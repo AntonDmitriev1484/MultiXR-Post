@@ -1,4 +1,5 @@
 <launch>
+    <arg name="dir" default="2"/>
     <param name="use_sim_time" value="false" />
 
     <!-- Main node -->
@@ -9,8 +10,9 @@
         <remap from="/imu"                      to="/camera/camera/imu"/>
 
         <!-- Parameters for original ORB-SLAM3 -->
+        <!-- Run SLAM with the parameters for our specific NUC -->
         <param name="voc_file"      type="string" value="$(find orb_slam3_ros)/orb_slam3/Vocabulary/ORBvoc.txt.bin"/>
-        <param name="settings_file" type="string" value="/data/orbslam/config/stereoi_rs2.yaml"/>
+        <param name="settings_file" type="string" value="/data/$(arg dir)/orbslam/config/slam_config.yaml"/>
 
         <!-- Parameters for ROS -->
         <param name="world_frame_id"    type="string"   value="world" />
