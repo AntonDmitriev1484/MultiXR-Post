@@ -21,9 +21,9 @@ import copy
 
 from utils.load_rostypes import *
 from utils.ros_msg_handlers import *
-from utils.apriltag import *
 from utils.math_utils import *
 from utils.vicon_utils import *
+from utils.optitrack_utils import *
 
 
 import matplotlib.pyplot as plt
@@ -89,42 +89,15 @@ bagpath = Path(f'../collect/ros2/{args.trial_name}')
 if args.vicon_available:
     vicon_data = parse_vicon_csv(in_vicon)
 
-# headset_data contains the pose of the marker I had on the decawave antenna in the world frame.
+id = 2
+optitrack_data = load_optitrack(Path("/home/antond2/ros_ws/ros2/opti_circle_test2"), id)
 
+exit()
 
-# Need to maintain another array that we can buffer data to before dumping one sensor per csv
-topic_to_processing = {
-                '/uwb_ranges': (proc_range, []),
-                  '/camera/camera/imu': (proc_imu, []),
-                  '/camera/camera/infra1/image_rect_raw': (proc_infra1_frame, []),
-                  '/camera/camera/infra2/image_rect_raw': (proc_infra2_frame, []),
-}
 
 all_data = []
-dataset_topics = [ k for k,v in topic_to_processing.items()]
-gt_standalone = []
 
 
-rostypes = load_rostypes()
-uwb_message_count = 0
-processed_uwb_message = 0
-# Create reader instance and open for reading.
-with AnyReader([bagpath], default_typestore=rostypes) as reader:
-    connections = [x for x in reader.connections if x.topic in dataset_topics]
-    for connection, timestamp, rawdata in reader.messages(connections=connections):
-
-        try:
-            msg = reader.deserialize(rawdata, connection.msgtype)
-            proc, arr_ref = topic_to_processing[connection.topic]
-            proc(msg, arr_ref)
-
-        except Exception:
-            print( "Exception! skipped message")
-            continue  # optionally log here
-
-# Processors functions have now buffered their individual topics into arr_ref
-# This is useful for writing the same datastream to multiple files.
-# Then, lastly, we can create all.json using the buffered measurements.
 
 
 # # Filter for messages within bag timestamp range.

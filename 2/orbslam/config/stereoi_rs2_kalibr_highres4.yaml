@@ -1,0 +1,138 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters. Adjust them!
+#--------------------------------------------------------------------------------------------
+File.version: "1.0"
+
+Camera.type: "PinHole"
+
+# Left Camera calibration and distortion parameters (OpenCV)
+Camera1.fx: 641.1292146156212
+Camera1.fy: 642.3626385227732
+Camera1.cx: 640.3167957458193
+Camera1.cy: 362.30403810143576
+
+# Pinhole distortion parameters
+Camera.k1: 0.003977171180427234
+Camera.k2: -0.0009267292278499054
+Camera.p1: 0.0006249881391960094
+Camera.p2: -0.00046225821772722455
+
+# Right Camera calibration and distortion parameters (OpenCV)
+Camera2.fx: 641.7770169639437
+Camera2.fy: 643.0751841552959
+Camera2.cx: 638.794832085366
+Camera2.cy: 362.31252236366805
+
+# Pinhole distortion parameters
+Camera.k1: 0.00027474103847521147
+Camera.k2: 0.0038602331834331266
+Camera.p1: 0.00038184959222272103
+Camera.p2: -0.00030791724683486727
+
+# Kalibr only gives transform from left camera to right camera,
+# We need to invert that to get this: 
+# Transformation matrix from right camera to left camera
+Stereo.T_c1_c2: !!opencv-matrix
+  rows: 4
+  cols: 4
+  dt: f
+  data: [ 0.99999528,  0.00027447, -0.00306068,  0.05007491,
+       -0.0002744 ,  0.99999996,  0.00002072, -0.0000146 ,
+        0.00306068, -0.00001988,  0.99999532, -0.00001715,
+        0.        ,  0.        ,  0.        ,  1.        ]
+
+
+#T_cn_cnm1
+# The camera is exterunted, always relative to the last camera in the chain
+ #(For example, CAM1: T_CN_CNM1 =  T_C1_C0, convert CAM0 to CAM1 coordinate)
+
+# Overlapping area between images (to be updated)
+#Camera1.overlappingBegin: 0
+#Camera1.overlappingEnd: 848
+
+#Camera2.overlappingBegin: 0
+#Camera2.overlappingEnd: 848
+
+# Camera resolution
+Camera.width: 1280
+Camera.height: 720
+
+# Camera frames per second 
+Camera.fps: 30
+
+# Color order of the images (0: BGR, 1: RGB. It is ignored if images are grayscale)
+Camera.RGB: 0
+
+# Close/Far threshold. Baseline times.
+Stereo.ThDepth: 40.0
+
+#--------------------------------------------------------------------------------------------
+# IMU Parameters
+#--------------------------------------------------------------------------------------------
+
+# This is a lie, you need to take the transform from left camera to body frame.
+
+# Transformation from body-frame (imu) to left camera
+IMU.T_b_c1: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: f
+   data: [ 0.99999716,  0.0013426 , -0.00196875,  0.04546616,
+       -0.00133794,  0.99999631,  0.00236454,  0.00044508,
+       0.00197192, -0.0023619 ,  0.99999527,  0.02055813,
+       0.        ,  0.        ,  0.        ,  1.        ]
+#NOTE TO ANTON JUST UPDATED THIS TO BE KALIBR_HIGHRES4
+
+# Do not insert KFs when recently lost
+IMU.InsertKFsWhenLost: 0
+
+# IMU noise
+# Should I be passing in the regular noise density or discrete noise density???
+IMU.NoiseGyro: 0.002049600985797649 # rad/s^0.5 
+IMU.NoiseAcc: 0.02064189891192468 # m/s^1.5
+IMU.GyroWalk: 0.00003199855545594742 # rad/s^1.5
+IMU.AccWalk: 0.0022919238444020808 # m/s^2.5
+IMU.Frequency: 200.0
+
+# Loading a previous map session
+# Should be the path within the Docker container
+System.LoadAtlasFromFile: "/data/2/orbslam/maps/isens_map_test1_nuc2_raw.osa"
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters
+#--------------------------------------------------------------------------------------------
+
+# ORB Extractor: Number of features per image
+ORBextractor.nFeatures: 1500 # Tested with 1250
+#ORBextractor.nFeatures: 2000 # Tested with 1250
+
+# ORB Extractor: Scale factor between levels in the scale pyramid 	
+ORBextractor.scaleFactor: 1.2
+
+# ORB Extractor: Number of levels in the scale pyramid	
+ORBextractor.nLevels: 8
+
+# ORB Extractor: Fast threshold
+# Image is divided in a grid. At each cell FAST are extracted imposing a minimum response.
+# Firstly we impose iniThFAST. If no corners are detected we impose a lower value minThFAST
+# You can lower these values if your images have low contrast			
+ORBextractor.iniThFAST: 15
+ORBextractor.minThFAST: 3
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -3.5
+Viewer.ViewpointF: 500.0
+Viewer.imageViewScale: 2.0
+

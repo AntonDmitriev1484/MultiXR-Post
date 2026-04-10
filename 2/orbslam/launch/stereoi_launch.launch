@@ -12,7 +12,7 @@
         <!-- Parameters for original ORB-SLAM3 -->
         <!-- Run SLAM with the parameters for our specific NUC -->
         <param name="voc_file"      type="string" value="$(find orb_slam3_ros)/orb_slam3/Vocabulary/ORBvoc.txt.bin"/>
-        <param name="settings_file" type="string" value="/data/$(arg dir)/orbslam/config/slam_config.yaml"/>
+        <param name="settings_file" type="string" value="/data/$(arg dir)/orbslam/config/stereoi_rs2_kalibr_highres4.yaml"/>
 
         <!-- Parameters for ROS -->
         <param name="world_frame_id"    type="string"   value="world" />
