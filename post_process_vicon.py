@@ -32,65 +32,41 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 # Example usage:
 # python3 post_process_vicon.py --trial_name irl3_los_walking --vicon_trial_name irl3_los_walking --map_vicon_to_uwb --no_orbslam True -c cam_target_daslab
 
+# Example usage:
+# python3 post_process_vicon.py opti_circle_test1 --opti --slam 20
+# keep opti at default frequency, subsample SLAM to 20Hz.
 
 parser = argparse.ArgumentParser(description="Stream collector")
-parser.add_argument("--trial_name" , "-t", type=str)
-parser.add_argument("--vicon_available", action="store_true")
-parser.add_argument("--slam_available", action="store_true") # If we have no orbslam data, just use vicon for everything instead.
-# Since my code is a mess, I'm going to do this by just aliasing the vicon data into the slam arrays.
-
+parser.add_argument("id", type=int)
+parser.add_argument("trial_name" , type=str)
 parser.add_argument("--calibration_file", "-c", type=str)
-parser.add_argument("--crop_start", type=float, default=0) # Pass the relative timestamp from startthat you want to crop away all data before. Data will still be used to compute T.
-parser.add_argument("--anchors_file", "-a", type=str)
-parser.add_argument("--apriltags_file", "-p", type=str)
-
-parser.add_argument("--synth_slam", type=float, nargs=2)
-
-parser.add_argument("--interpolate_slam", "-i", default=0, type=int) # -i controls how many interpolated poses you want between each pair of SLAM poses.
-parser.add_argument("--synth_uwb_f", default=0, type=int) # interpolate GT to this frequency, so that gtsam_test can use synthetic ranges.
-parser.add_argument("--synth_slam_f", default=0, type=int) #  filter GT to this frequency, must be < 20 should really be named 'lower_slam_frequency'
-parser.add_argument("--synth_vicon_f", default=0, type=int)
-
-parser.add_argument("--leave_slam_frame", action="store_true")
-parser.add_argument("--slam_f", default=0, type=float) # subsample the slam frequency
-
-parser.add_argument("--map_vicon_to_uwb", action="store_true")
-parser.add_argument("--include_vicon_tx_pose", action="store_true")
-parser.add_argument("--vicon_for_worldframing", action="store_true")
-# Instead of using AprilTag detection to convert SLAM to world frame, use Vicon.
-# This lets us see a trajectory with just SLAM error, instead of SLAM + AprilTag error
-
+parser.add_argument("--opti", nargs="?", const=None, type=float)
+parser.add_argument("--slam", nargs="?", const=None, type=float)
 args = parser.parse_args()
 
-outpath = f'./out/{args.trial_name}_post'
+ID = args.id
 
-out_infra1 = f'{outpath}/infra1'
-out_infra2 = f'{outpath}/infra2'
-out_ml = f'{outpath}/ml'
-out_synthetic = outpath+"/synthetic"
-out_world = f'../world/{args.trial_name}' # Vicon can define apriltags and anchors set up in world frame
 
-os.makedirs(outpath, exist_ok=True)
-os.makedirs(out_infra1, exist_ok=True)
-os.makedirs(out_infra2, exist_ok=True)
-os.makedirs(out_ml, exist_ok=True)
-os.makedirs(out_synthetic, exist_ok=True)
-os.makedirs(out_world, exist_ok=True)
+outpath = f'./{ID}/post/{args.trial_name}_post'
 
-in_slam = f'../orbslam/out/{args.trial_name}_cam_traj.txt'
-in_slam_kf = f'../orbslam/out/{args.trial_name}_kf_traj.txt'
-in_kalibr = f"../kalibr/camimu_out/{args.calibration_file}-camchain-imucam.yaml"
-in_vicon = f"../vicon/out/{args.trial_name}.csv"
-in_apriltags = f"../world/{args.apriltags_file}"
-in_anchors = f"../world/{args.anchors_file}"
+out_world = outpath+f'/world/' # Vicon can define apriltags and anchors set up in world frame
 
+
+in_slam = f'./{ID}/orbslam/out/{args.trial_name}_nuc{ID}_raw_cam_traj.txt'
+in_slam_kf = f'./{ID}/orbslam/out/{args.trial_name}_nuc{ID}_raw_kf_traj.txt'
+
+inpath = f'./{ID}/collect/{args.trial_name}_nuc{ID}_raw'
+in_kalibr_dir = inpath+f"/calibration/"
+kalibr_files = list(Path(in_kalibr_dir).glob("*.yaml"))
+in_kalibr = f"{kalibr_files[0]}"
+
+imu = json.load(open(inpath+'/imu_raw.json', 'r'))
+uwb = json.load(open(inpath+'/uwb_raw.json', 'r'))
+metadata = json.load(open(inpath+'/meta.json', 'r'))
+
+in_opti_bagpath = Path(f"/home/antond2/ros_ws/ros2/{args.trial_name}")
 bagpath = Path(f'../collect/ros2/{args.trial_name}')
-
-if args.vicon_available:
-    vicon_data = parse_vicon_csv(in_vicon)
-
-id = 2
-optitrack_data = load_optitrack(Path("/home/antond2/ros_ws/ros2/opti_circle_test2"), id)
+optitrack_data = load_optitrack(in_opti_bagpath, ID)
 
 exit()
 
