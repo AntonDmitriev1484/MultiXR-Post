@@ -24,11 +24,19 @@ def define_transforms(in_kalibr):
     T.T_imu_to_body = np.eye(4)
     T.T_body_to_imu = np.linalg.inv(T.T_imu_to_body)
 
-    T_cam1_to_head = np.array([[-1 , 0, 0, 0.0175],
-                            [0, 0, -1, -0.08],
-                            [0, -1, 0, 0],
-                            [0, 0, 0, 1]])
-    T.T_head_to_cam1 = np.linalg.inv(T_cam1_to_head)
+    # T_cam1_to_head = np.array([[-1 , 0, 0, 0.0175],
+    #                         [0, 0, -1, -0.08],
+    #                         [0, -1, 0, 0],
+    #                         [0, 0, 0, 1]])
+    # T.T_head_to_cam1 = np.linalg.inv(T_cam1_to_head)
+
+    #TODO: Verify by hand
+    T.T_head_to_cam1 = np.array(
+        [[0, 1, 0, 0],
+         [-1, 0, 0, 0.0175],
+         [0, 0, -1, -0.08],
+         [0, 0, 0, 1]]
+    )
 
     with open(in_kalibr, 'r') as fs: calibration = yaml.safe_load(fs)
     T.T_imu_to_cam1 = np.array(calibration['cam0']['T_cam_imu'])
@@ -36,7 +44,9 @@ def define_transforms(in_kalibr):
     T.T_head_to_body = T.T_cam1_to_body @ T.T_head_to_cam1 # Seems to work better?
 
 
-    T.T_head_to_body = np.eye(4)
+    # T.T_head_to_body = np.linalg.inv(T.T_imu_to_cam1) @ T.T_head_to_cam1 @ n
+
+
     T.T_inertial_to_world = np.eye(4)
 
 
