@@ -52,96 +52,20 @@ def euler_to_tum(arr, degrees=True):
     return np.array([arr[0], arr[4], arr[5], arr[6], qx, qy, qz, qw])
 
 
-def parse_vicon(file):
-    """
-    Old Vicon parser for Euler-angle style exports.
-    """
-    rows = []
-    frame_counter = 1
-    line_counter = 0
-    with open(file, 'r') as f:
-        for line in f:
-            if line_counter >= 5:
-                row = [x for x in line.strip().split(',')]
-                if '' in row:  # Missing pose → repeat last
-                    row = rows[len(rows)-1]
-                    row[0] = frame_counter
-                row = [float(x) for x in row]
-                rows.append(row)
-                frame_counter += 1
-            line_counter += 1
-
-    data = np.array(rows)
-
-    # Example indexing (custom per dataset)
-    headset_arr_rpy = data[:, [0, 2, 3, 4, 5, 6, 7]]
-    anchor_arr_rpy = data[:, [0, 8, 9, 10, 11, 12, 13]]
-
-    headset_arr = np.array([euler_to_tum(row) for row in headset_arr_rpy])
-    anchor_arr = np.array([euler_to_tum(row) for row in anchor_arr_rpy])
-
-    # Scale to meters
-    headset_arr[:, 1:4] /= 1000
-    anchor_arr[:, 1:4] /= 1000
-
-    return headset_arr, anchor_arr
-
-
-def parse_vicon_csv(file, subject_filter=None):
-    """
-    Parse Vicon CSV with columns:
-    timestamp,frame,subject,segment,x,y,z,qx,qy,qz,qw
-
-    Args:
-        file (str): path to CSV
-        subject_filter (str or None): if given, only return this subject’s poses
-
-    Returns:
-        dict[str, np.ndarray]: {subject: array[N,8]} with rows [t tx ty tz qx qy qz qw]
-    """
-    subjects = {}
-
-    with open(file, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            t = float(row["timestamp"]) / 1e3 # Convert from ms to s
-            subj = row["subject"]
-
-            tx = float(row["x"]) / 1e3  # mm → m
-            ty = float(row["y"]) / 1e3
-            tz = float(row["z"]) / 1e3
-            qx = float(row["qx"])
-            qy = float(row["qy"])
-            qz = float(row["qz"])
-            qw = float(row["qw"])
-
-            pose = np.array([t, tx, ty, tz, qx, qy, qz, qw])
-
-            if subject_filter is None or subj == subject_filter:
-                if subj not in subjects:
-                    subjects[subj] = []
-                subjects[subj].append(pose)
-
-    # convert to numpy arrays
-    for subj in subjects:
-        subjects[subj] = np.vstack(subjects[subj])
-
-    return subjects
 
 # Crop all Vicon data to be within the ROS timestamps
 # Assumption is that Vicon data timestamps are clock synced with NUC.
-def crop_vicon(vicon_data, start, end):
-
-    for tracked_name, data in vicon_data.items():
+def crop_opti(opti_data, start, end):
+    for tracked_name, data in opti_data.items():
         data = [ d for d in data if start < d[0] and d[0] < end ] # Doesn't mutate vicon data
-        vicon_data[tracked_name] = data # this does
-    return vicon_data
+        opti_data[tracked_name] = data # this does
+    return opti_data
 
-def clean_vicon(vicon_data):
+def clean_opti(opti_data):
 
     # If you're mobile and translation suddenly drop to 0, that means tracking was lost. interpolate that thang
 
-    for tracked_name, data in vicon_data.items():
+    for tracked_name, data in opti_data.items():
 
         # In case we start off at a 0 pose, find the first non-zero pose
         # and set that to be our start pose
@@ -183,8 +107,11 @@ def clean_vicon(vicon_data):
                     interp_pose = HTM_to_TUM(interp_pose) # Returns a non timestamped HTM
                     data[i] = np.insert(interp_pose, 0, current_timestamp) #I'm pretty sure this mutates the original array?
 
-    vicon_data[tracked_name] = data
-    return vicon_data
+    opti_data[tracked_name] = data
+    return opti_data
+
+
+
 
 def get_tx_position(T_vuwb_to_uwbtx, data):
     positions = []
@@ -194,9 +121,3 @@ def get_tx_position(T_vuwb_to_uwbtx, data):
             T_world_to_tx = T_vuwb_to_uwbtx @ np.linalg.inv(T_vuwb_to_world)
             position = np.linalg.inv(T_world_to_tx)[:3,3]
             return position
-    # for pose in data:
-    #     if np.linalg.norm(np.array(pose)[1:4]) != 0: # Filter out lost tracking outliers
-    #         T_vuwb_to_world = slam_quat_to_HTM(pose)
-    #         T_world_to_tx = T_vuwb_to_uwbtx @ np.linalg.inv(T_vuwb_to_world)
-    #         positions.append(np.linalg.inv(T_world_to_tx)[:3,3])
-    # return np.average(np.array(positions), axis=0)

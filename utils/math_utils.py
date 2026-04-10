@@ -3,6 +3,49 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
+from types import SimpleNamespace
+import yaml
+
+def define_transforms(in_kalibr):
+    T = SimpleNamespace()
+
+    # Transform from vicon marker on helmet, to center of RS camera (body frame)
+
+    # Vicon coordinate frames are marked with a 'v'
+
+    #Transform from vicon marker on anchor, to the center of the DW1000 UWB chip
+    T.T_vuwb_to_uwbtx = np.eye(4) # Probably better to express as a vector in the vUWB frame
+    T.T_vuwb_to_uwbtx[:3, 3] = [0.035, 0, 0] # 3cm down along x-axis.
+
+
+    # The SLAM tracked body is the left camera.
+
+    # 'Head' refers to the vicon tracked head pose
+    T.T_imu_to_body = np.eye(4)
+    T.T_body_to_imu = np.linalg.inv(T.T_imu_to_body)
+
+    T_cam1_to_head = np.array([[-1 , 0, 0, 0.0175],
+                            [0, 0, -1, -0.08],
+                            [0, -1, 0, 0],
+                            [0, 0, 0, 1]])
+    T.T_head_to_cam1 = np.linalg.inv(T_cam1_to_head)
+
+    with open(in_kalibr, 'r') as fs: calibration = yaml.safe_load(fs)
+    T.T_imu_to_cam1 = np.array(calibration['cam0']['T_cam_imu'])
+    T.T_cam1_to_body = T.T_imu_to_body @ np.linalg.inv(T.T_imu_to_cam1)
+    T.T_head_to_body = T.T_cam1_to_body @ T.T_head_to_cam1 # Seems to work better?
+
+
+    T.T_head_to_body = np.eye(4)
+    T.T_inertial_to_world = np.eye(4)
+
+
+    T_decawave_to_head = np.eye(4)
+    T_decawave_to_head[:3,3] = np.array([-0.01, -0.0175, 0.0525])
+    T.T_head_to_decawave = np.linalg.inv(T_decawave_to_head)
+    T.T_body_to_decawave = T.T_head_to_decawave @ np.linalg.inv(T.T_head_to_body)
+
+
 
 def slam_quat_to_HTM(nparr): # Doesnt timestamp
     translation = nparr[1:4]
