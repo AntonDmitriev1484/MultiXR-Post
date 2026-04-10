@@ -56,58 +56,57 @@ def euler_to_tum(arr, degrees=True):
 # Crop all Vicon data to be within the ROS timestamps
 # Assumption is that Vicon data timestamps are clock synced with NUC.
 def crop_opti(opti_data, start, end):
-    for tracked_name, data in opti_data.items():
-        data = [ d for d in data if start < d[0] and d[0] < end ] # Doesn't mutate vicon data
-        opti_data[tracked_name] = data # this does
+    opti_data = [ d for d in opti_data if start < d[0] and d[0] < end ] # Doesn't mutate vicon data
     return opti_data
+
 
 def clean_opti(opti_data):
 
     # If you're mobile and translation suddenly drop to 0, that means tracking was lost. interpolate that thang
 
-    for tracked_name, data in opti_data.items():
+    data = opti_data
 
-        # In case we start off at a 0 pose, find the first non-zero pose
-        # and set that to be our start pose
+    # In case we start off at a 0 pose, find the first non-zero pose
+    # and set that to be our start pose
 
-        def is_outlier(tum_pose):
-            norm = np.linalg.norm(np.array(tum_pose)[1:])
-            return norm <= 1e-5
+    def is_outlier(tum_pose):
+        norm = np.linalg.norm(np.array(tum_pose)[1:])
+        return norm <= 1e-5
 
-        # If our starting pose is an outlier and we have nothing to interpolate between
-        start_pose = None
-        for i in range(0, len(data)):
-            if not is_outlier(data[i]): 
-                start_pose = np.array(data[i]) # Next valid TUM timestamped pose
-                break
+    # If our starting pose is an outlier and we have nothing to interpolate between
+    start_pose = None
+    for i in range(0, len(data)):
+        if not is_outlier(data[i]): 
+            start_pose = np.array(data[i]) # Next valid TUM timestamped pose
+            break
 
-        for p in range(0,i):
-            data[p] = start_pose
+    for p in range(0,i):
+        data[p] = start_pose
 
-        # Now clean
-        for i in range(1, len(data)):
-            if is_outlier(data[i]):
+    # Now clean
+    for i in range(1, len(data)):
+        if is_outlier(data[i]):
 
-                last_pose = np.array(data[i-1]) # Last valid TUM timestamped pose
-                next_pose = None
-                interp_pose = None
-                for j in range(i+1, len(data)): # Find next valid TUM timestamped pose
-                    # print(data)
-                    if not is_outlier(data[j]): 
-                        next_pose = np.array(data[j]) # Next valid TUM timestamped pose
-                        current_timestamp = data[i][0]
-                        interp_pose = interpolate_pose(
-                            slam_quat_to_HTM(last_pose), last_pose[0],
-                            slam_quat_to_HTM(next_pose), next_pose[0],
-                            current_timestamp, 100
-                        )
-                        break
+            last_pose = np.array(data[i-1]) # Last valid TUM timestamped pose
+            next_pose = None
+            interp_pose = None
+            for j in range(i+1, len(data)): # Find next valid TUM timestamped pose
+                # print(data)
+                if not is_outlier(data[j]): 
+                    next_pose = np.array(data[j]) # Next valid TUM timestamped pose
+                    current_timestamp = data[i][0]
+                    interp_pose = interpolate_pose(
+                        slam_quat_to_HTM(last_pose), last_pose[0],
+                        slam_quat_to_HTM(next_pose), next_pose[0],
+                        current_timestamp, 100
+                    )
+                    break
 
-                if interp_pose is not None:
-                    interp_pose = HTM_to_TUM(interp_pose) # Returns a non timestamped HTM
-                    data[i] = np.insert(interp_pose, 0, current_timestamp) #I'm pretty sure this mutates the original array?
+            if interp_pose is not None:
+                interp_pose = HTM_to_TUM(interp_pose) # Returns a non timestamped HTM
+                data[i] = np.insert(interp_pose, 0, current_timestamp) #I'm pretty sure this mutates the original array?
 
-    opti_data[tracked_name] = data
+    opti_data = data
     return opti_data
 
 

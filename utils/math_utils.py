@@ -45,6 +45,7 @@ def define_transforms(in_kalibr):
     T.T_head_to_decawave = np.linalg.inv(T_decawave_to_head)
     T.T_body_to_decawave = T.T_head_to_decawave @ np.linalg.inv(T.T_head_to_body)
 
+    return T
 
 
 def slam_quat_to_HTM(nparr): # Doesnt timestamp
