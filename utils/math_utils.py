@@ -159,8 +159,8 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
     opti_ts = body_opti_HTMs[:, 0]
     slam_ts = body_slam_HTMs[:, 0]
 
-    opti_poses = body_opti_HTMs[:, 1:17].reshape((-1, 4,4))
-    slam_poses = body_slam_HTMs[:, 1:17].reshape((-1, 4,4))
+    opti_poses = np.linalg.inv(body_opti_HTMs[:, 1:17].reshape((-1, 4,4)))
+    slam_poses = np.linalg.inv(body_slam_HTMs[:, 1:17].reshape((-1, 4,4)))
 
     # Convert positions to evo format
     opti_positions = opti_poses[:, :3, 3]
@@ -169,10 +169,8 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
     # Convert rotations to evo format
     opti_rot_mats = opti_poses[:, :3, :3]
     slam_rot_mats = slam_poses[:, :3, :3]
-    # opti_quats_xyzw = R.from_matrix(opti_rot_mats).as_quat()
-    # slam_quats_xyzw = R.from_matrix(slam_rot_mats).as_quat()
-    opti_quats_xyzw = R.from_matrix(opti_rot_mats).inv().as_quat()
-    slam_quats_xyzw = R.from_matrix(slam_rot_mats).inv().as_quat()
+    opti_quats_xyzw = R.from_matrix(opti_rot_mats).as_quat()
+    slam_quats_xyzw = R.from_matrix(slam_rot_mats).as_quat()
     def xyzw_to_wxyz(q):
         return np.column_stack([q[:, 3], q[:, 0], q[:, 1], q[:, 2]])
     opti_quats = xyzw_to_wxyz(opti_quats_xyzw)
@@ -195,22 +193,22 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
         timestamps=slam_ts
     )
 
-    fig = plt.figure(figsize=(8, 8))
-    plot_mode = plot.PlotMode.xyz
-    ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
-    # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
-    plot.traj(ax, plot_mode, slam_traj, "-", "blue")
-    fig.axes.append(ax)
-    plt.title("SLAM traj object before alignment")
+    # fig = plt.figure(figsize=(8, 8))
+    # plot_mode = plot.PlotMode.xyz
+    # ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
+    # # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
+    # plot.traj(ax, plot_mode, slam_traj, "-", "blue")
+    # fig.axes.append(ax)
+    # plt.title("SLAM traj object before alignment")
 
 
-    fig = plt.figure(figsize=(8, 8))
-    plot_mode = plot.PlotMode.xyz
-    ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
-    # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
-    plot.traj(ax, plot_mode, opti_traj, "-", "green")
-    fig.axes.append(ax)
-    plt.title("Optitrack traj object before alignment")
+    # fig = plt.figure(figsize=(8, 8))
+    # plot_mode = plot.PlotMode.xyz
+    # ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
+    # # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
+    # plot.traj(ax, plot_mode, opti_traj, "-", "green")
+    # fig.axes.append(ax)
+    # plt.title("Optitrack traj object before alignment")
 
 
     # Time synchronization
@@ -220,28 +218,53 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
     traj_est.align(traj_ref, correct_scale=False)
 
 
-    fig = plt.figure(figsize=(8, 8))
-    plot_mode = plot.PlotMode.xyz
-    ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
-    # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
-    plot.traj(ax, plot_mode, traj_est, "-", "blue")
-    fig.axes.append(ax)
-    plt.title("SLAM traj object after alignment")
+    # fig = plt.figure(figsize=(8, 8))
+    # plot_mode = plot.PlotMode.xyz
+    # ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
+    # # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
+    # plot.traj(ax, plot_mode, traj_est, "-", "blue")
+    # fig.axes.append(ax)
+    # plt.title("SLAM traj object after alignment")
 
 
-    plt.show()
+    # plt.show()
 
     # traj_est is now SLAM trajectory aligned to optitrack world frame
 
     traj_est_out = []
     # Convert back to list of TUM poses
-    for t, p, q in zip(
+    # for t, p, q in zip(
+    #     traj_est.timestamps,
+    #     traj_est.positions_xyz,
+    #     traj_est.orientations_quat_wxyz
+    # ):
+    #     # convert wxyz → xyzw
+    #     qx, qy, qz, qw = q[1], q[2], q[3], q[0]
+    #     traj_est_out.append([t, p[0], p[1], p[2], qx, qy, qz, qw])
+
+    traj_est_out = []
+
+    rots = R.from_quat(traj_est.orientations_quat_wxyz[:, [1,2,3,0]])  # wxyz → xyzw
+
+    for t, p, r in zip(
         traj_est.timestamps,
         traj_est.positions_xyz,
-        traj_est.orientations_quat_wxyz
+        rots
     ):
-        # convert wxyz → xyzw
-        qx, qy, qz, qw = q[1], q[2], q[3], q[0]
-        traj_est_out.append([t, p[0], p[1], p[2], qx, qy, qz, qw])
+        # inverse rotation
+        r_inv = r.inv()
+
+        # inverse translation: -R^T t
+        p_inv = -r_inv.apply(p)
+
+        # quaternion back to xyzw
+        qx, qy, qz, qw = r_inv.as_quat()
+
+        # append
+        traj_est_out.append([
+            t,
+            p_inv[0], p_inv[1], p_inv[2],
+            qx, qy, qz, qw
+        ])
 
     return traj_est_out
