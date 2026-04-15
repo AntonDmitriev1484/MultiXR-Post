@@ -124,7 +124,6 @@ if args.slam is not None:
 
 ### Process optitrack data
 opti_json = []
-print(f"{args.opti=}")
 if args.opti is not None:
     def opti_tracked_body_to_my_body(T_head_to_world):
         return T.T_head_to_body @ np.linalg.inv(T_head_to_world)

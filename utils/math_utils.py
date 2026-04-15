@@ -32,17 +32,33 @@ def define_transforms(in_kalibr):
 
     #TODO: Verify by hand
     T.T_head_to_cam1 = np.array(
-        [[0, 1, 0, 0],
-         [-1, 0, 0, 0.0175],
+        [[-1, 0, 0, 0],
+         [0, 1, 0, 0.0175],
          [0, 0, -1, -0.08],
          [0, 0, 0, 1]]
     )
 
+    #"Down by 2 deg"
+    # T.extra_rot = np.array([
+    #      [0.9993908270190958, -0.03489949670250097, 0, 0],
+    #      [0.03489949670250097, 0.9993908270190958, 0, 0],
+    #      [0, 0, 1, 0],
+    #      [0, 0, 0, 1]
+    # ])
+
+    #"Up by 2 deg"
+    # T.extra_rot = np.array([
+    #      [0.9993908270190958, 0.03489949670250097, 0, 0],
+    #      [-0.03489949670250097, 0.9993908270190958, 0, 0],
+    #      [0, 0, 1, 0],
+    #      [0, 0, 0, 1]
+    # ])
+
     with open(in_kalibr, 'r') as fs: calibration = yaml.safe_load(fs)
     T.T_imu_to_cam1 = np.array(calibration['cam0']['T_cam_imu'])
     T.T_cam1_to_body = T.T_imu_to_body @ np.linalg.inv(T.T_imu_to_cam1)
-    T.T_head_to_body = T.T_cam1_to_body @ T.T_head_to_cam1 # Seems to work better?
-
+    # T.T_head_to_body = T.T_cam1_to_body @ T.extra_rot @ T.T_head_to_cam1
+    T.T_head_to_body = T.T_cam1_to_body @ T.T_head_to_cam1
 
     # T.T_head_to_body = np.linalg.inv(T.T_imu_to_cam1) @ T.T_head_to_cam1 @ n
 
