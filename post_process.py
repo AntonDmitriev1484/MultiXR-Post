@@ -40,6 +40,7 @@ parser.add_argument("trial_name" , type=str)
 parser.add_argument("--calibration_file", "-c", type=str)
 parser.add_argument("--opti", nargs="?", const=0, type=float)
 parser.add_argument("--slam", nargs="?", const=0, type=float)
+parser.add_argument("--align", "-a", action="store_true")
 args = parser.parse_args()
 
 ID = args.id
@@ -88,6 +89,9 @@ T = define_transforms(in_kalibr) #TODO: Need to revise this method for how optit
 
 ### Process SLAM data
 slam_json = []
+body_slam_tum_traj = [] # Preparing for later alignment
+body_slam_HTMs = []
+
 if args.slam is not None:
     slam_kf_data = np.loadtxt(in_slam_kf)
     slam_kf_data[:,0] *= 1e-9
@@ -99,15 +103,20 @@ if args.slam is not None:
     def slam_tracked_body_to_my_body(T_cam1_to_sorigin): # SLAM quat gives you the transform from cam1 frame to slam origin
         return T.T_cam1_to_body @ np.linalg.inv(T_cam1_to_sorigin)
 
-    opti_body_poses, slam_body_velocities = aggregate_tracker(slam_tracked_body_to_my_body, slam_data)
+    slam_body_poses, slam_body_velocities = aggregate_tracker(slam_tracked_body_to_my_body, slam_data)
+    body_slam_HTMs = slam_body_poses
     # Each pose is the IMU pose in the slam frame. i.e. T_slamworld_to_imu. This is what plotting assumes.
 
+    # aggregate_tracker returns [timestamp, flattened HTM]
+    # for slam_tum_traj we need to convert back to tum
+    for pose in slam_body_poses: body_slam_tum_traj.append(slam_HTM_to_TUM(pose))
+
     # If we passed a valid frequency to subsample to
-    opti_freq = len(slam_data) / (END-START)
-    if opti_freq > args.slam > 0:
-        skip = math.ceil(opti_freq / args.slam) # Number of poses to skip in subsampling to synth slam frequency
-        opti_body_poses = np.array(opti_body_poses)
-        opti_body_poses = opti_body_poses[::skip] # Finally, subsample to required frequency
+    slam_freq = len(slam_data) / (END-START)
+    if slam_freq > args.slam > 0:
+        skip = math.ceil(slam_freq / args.slam) # Number of poses to skip in subsampling to synth slam frequency
+        slam_body_poses = np.array(slam_body_poses)
+        slam_body_poses = slam_body_poses[::skip] # Finally, subsample to required frequency
 
         # Convert from nparray to json format
     # Add Vicon poses to all_data
@@ -120,10 +129,12 @@ if args.slam is not None:
                     "vy": float(body_v[2]),
                     "vz": float(body_v[3])
             }
-        } for body_pose, body_v in zip( list(opti_body_poses), list(slam_body_velocities))]
+        } for body_pose, body_v in zip( list(slam_body_poses), list(slam_body_velocities))]
 
 ### Process optitrack data
 opti_json = []
+body_opti_tum_traj = []
+body_opti_HTMs = []
 if args.opti is not None:
     def opti_tracked_body_to_my_body(T_head_to_world):
         return T.T_head_to_body @ np.linalg.inv(T_head_to_world)
@@ -133,7 +144,12 @@ if args.opti is not None:
     #     return np.linalg.inv(T_head_to_world)
 
     opti_body_poses, opti_body_velocities = aggregate_tracker(opti_tracked_body_to_my_body, np.array(opti_data))
+    body_opti_HTMs = opti_body_poses
     # Each pose is the IMU pose in the optitrack world frame.
+
+    # aggregate_tracker returns [timestamp, flattened HTM]
+    # for opti_tum_traj we need to convert back to tum
+    for pose in opti_body_poses: body_opti_tum_traj.append(slam_HTM_to_TUM(pose))
 
     # If we passed a valid frequency to subsample to
     opti_freq = len(opti_data) / (END-START)
@@ -154,6 +170,38 @@ if args.opti is not None:
         } for body_pose, body_v in zip( list(opti_body_poses), list(opti_body_velocities))]
     
 
+aligned_slam_json = []
+if args.align:
+     # Align the body's SLAM trajectory to the Optitrack trajectory
+     # Places our SLAM trajectory in a shared coordinate frame
+    body_slam_aligned_tum_traj = umeyama_alignment(body_opti_HTMs, body_slam_HTMs)
+
+    def identity(T_body_to_world): # Already in body frame.
+        return T_body_to_world
+    aligned_slam_body_poses, aligned_slam_body_velocities = aggregate_tracker(identity, np.array(body_slam_aligned_tum_traj))
+    # Each pose is the IMU pose in the optitrack world frame.
+
+    # If we passed a valid frequency to subsample to
+    slam_freq = len(slam_data) / (END-START)
+    if slam_freq > args.slam > 0:
+        skip = math.ceil(slam_freq / args.slam) # Number of poses to skip in subsampling to synth slam frequency
+        aligned_slam_body_poses = np.array(aligned_slam_body_poses)
+        aligned_slam_body_poses = aligned_slam_body_poses[::skip] # Finally, subsample to required frequency
+
+    aligned_slam_json = [ {
+            "t": float(body_pose[0]),
+            "type": "aligned_slam_pose",
+            "T_body_world" : body_pose[1:].reshape((4,4)),
+            "v_world": {
+                    "vx": float(body_v[1]),
+                    "vy": float(body_v[2]),
+                    "vz": float(body_v[3])
+            }
+        } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
+
+    # Now we just subsample this to the same rate as SLAM.
+
+
 
 # If we're using real UWB ranges, but have no compass
 # We interpolate on SLAM poses to match a synthetic orientation to that UWB range
@@ -162,7 +210,7 @@ if args.opti is not None:
 #     assisted_uwb_json = aggregate_assisted_uwb(uwb_json, vicon_tracked_body_to_my_body, np.array(vicon_data[vicon_name]), 100)
 
 # Compose the final factor graph dataset
-all_data = uwb_json + imu_json + opti_json + slam_json 
+all_data = uwb_json + imu_json + opti_json + slam_json + aligned_slam_json
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):

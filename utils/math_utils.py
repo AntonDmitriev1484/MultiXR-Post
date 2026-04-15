@@ -6,6 +6,14 @@ from scipy.spatial.transform import Slerp
 from types import SimpleNamespace
 import yaml
 
+# Imports do work, even if not detected
+from evo.core import trajectory
+from evo.core import sync
+from evo.core.trajectory import PoseTrajectory3D
+from evo.tools import plot
+import matplotlib.pyplot as plt
+
+
 def define_transforms(in_kalibr):
     T = SimpleNamespace()
 
@@ -138,3 +146,102 @@ def interpolate_pose(first_pose, first_timestamp, second_pose, second_timestamp,
     interp_pose[:3, 3] = interpolated_positions[idx_match]
 
     return interp_pose
+
+
+# These get passed in as lists of 1 x 17 numpy arrays
+def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
+
+    # Per examples here: https://github.com/MichaelGrupp/evo/blob/master/examples/alignment_demo.py
+
+    body_opti_HTMs = np.array(body_opti_HTMs)
+    body_slam_HTMs = np.array(body_slam_HTMs)
+
+    opti_ts = body_opti_HTMs[:, 0]
+    slam_ts = body_slam_HTMs[:, 0]
+
+    opti_poses = body_opti_HTMs[:, 1:17].reshape((-1, 4,4))
+    slam_poses = body_slam_HTMs[:, 1:17].reshape((-1, 4,4))
+
+    # Convert positions to evo format
+    opti_positions = opti_poses[:, :3, 3]
+    slam_positions = slam_poses[:, :3, 3]
+
+    # Convert rotations to evo format
+    opti_rot_mats = opti_poses[:, :3, :3]
+    slam_rot_mats = slam_poses[:, :3, :3]
+    # opti_quats_xyzw = R.from_matrix(opti_rot_mats).as_quat()
+    # slam_quats_xyzw = R.from_matrix(slam_rot_mats).as_quat()
+    opti_quats_xyzw = R.from_matrix(opti_rot_mats).inv().as_quat()
+    slam_quats_xyzw = R.from_matrix(slam_rot_mats).inv().as_quat()
+    def xyzw_to_wxyz(q):
+        return np.column_stack([q[:, 3], q[:, 0], q[:, 1], q[:, 2]])
+    opti_quats = xyzw_to_wxyz(opti_quats_xyzw)
+    slam_quats = xyzw_to_wxyz(slam_quats_xyzw)
+
+    print(f"{slam_poses[100, :, :]=}")
+    print(f"{slam_rot_mats[100, :, :]=}")
+    print(f"{slam_positions[100, :]=}")
+    print(f"{slam_ts[100]=}")
+
+    opti_traj = PoseTrajectory3D(
+        positions_xyz=opti_positions,
+        orientations_quat_wxyz=opti_quats,
+        timestamps=opti_ts
+    )
+
+    slam_traj = PoseTrajectory3D(
+        positions_xyz=slam_positions,
+        orientations_quat_wxyz=slam_quats,
+        timestamps=slam_ts
+    )
+
+    fig = plt.figure(figsize=(8, 8))
+    plot_mode = plot.PlotMode.xyz
+    ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
+    # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
+    plot.traj(ax, plot_mode, slam_traj, "-", "blue")
+    fig.axes.append(ax)
+    plt.title("SLAM traj object before alignment")
+
+
+    fig = plt.figure(figsize=(8, 8))
+    plot_mode = plot.PlotMode.xyz
+    ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
+    # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
+    plot.traj(ax, plot_mode, opti_traj, "-", "green")
+    fig.axes.append(ax)
+    plt.title("Optitrack traj object before alignment")
+
+
+    # Time synchronization
+    traj_ref, traj_est = sync.associate_trajectories(opti_traj, slam_traj, max_diff = 0.01)
+
+    # Align (SE3)
+    traj_est.align(traj_ref, correct_scale=False)
+
+
+    fig = plt.figure(figsize=(8, 8))
+    plot_mode = plot.PlotMode.xyz
+    ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
+    # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
+    plot.traj(ax, plot_mode, traj_est, "-", "blue")
+    fig.axes.append(ax)
+    plt.title("SLAM traj object after alignment")
+
+
+    plt.show()
+
+    # traj_est is now SLAM trajectory aligned to optitrack world frame
+
+    traj_est_out = []
+    # Convert back to list of TUM poses
+    for t, p, q in zip(
+        traj_est.timestamps,
+        traj_est.positions_xyz,
+        traj_est.orientations_quat_wxyz
+    ):
+        # convert wxyz → xyzw
+        qx, qy, qz, qw = q[1], q[2], q[3], q[0]
+        traj_est_out.append([t, p[0], p[1], p[2], qx, qy, qz, qw])
+
+    return traj_est_out

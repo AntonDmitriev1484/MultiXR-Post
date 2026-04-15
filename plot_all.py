@@ -25,6 +25,8 @@ if __name__ == "__main__":
     # Stride-based trajectory toggles
     parser.add_argument("--slam", type=int, default=0,
                         help="Stride for SLAM trajectory (0 = disable)")
+    parser.add_argument("--aligned_slam", type=int, default=0,
+                    help="Stride for optitrack-aligned SLAM trajectory (0 = disable)")
     parser.add_argument("--opti", type=int, default=0,
                         help="Stride for Optitrack body trajectory (0 = disable)")
 
@@ -54,6 +56,7 @@ if __name__ == "__main__":
     T_imu_to_body = np.array(Transforms["T_imu_to_body"])
 
     slam_poses = []
+    aligned_slam_poses = []
     synth_slam_poses = []
     opti_poses = []
     opti_ts = []
@@ -67,6 +70,8 @@ if __name__ == "__main__":
     for item in all_data:
         if item.get("type") == "slam_pose" and "T_body_world" in item:
             slam_poses.append(np.array(item["T_body_world"]))  # T_world_to_body
+        if item.get("type") == "aligned_slam_pose" and "T_body_world" in item:
+            aligned_slam_poses.append(np.array(item["T_body_world"]))  # T_world_to_body
         if item.get("type") == "opti_pose" and "T_body_world" in item:
             opti_poses.append(np.array(item["T_body_world"]))  # T_world_to_body
             velocity_vectors.append(np.array([item["v_world"]["vx"], item["v_world"]["vy"], item["v_world"]["vz"]]))
@@ -100,6 +105,21 @@ if __name__ == "__main__":
 
         for i in range(0, len(slam_poses), args.slam):
             draw_axes(ax, slam_poses[i], length=0.4)
+
+    # --- Aligned SLAM trajectory ---
+    if aligned_slam_poses and args.aligned_slam > 0:
+        positions_world = []
+        for body_pose in aligned_slam_poses:
+            positions_world.append(np.linalg.inv(body_pose)[:3, 3])
+        positions_world = np.array(positions_world)
+
+        ax.plot(positions_world[:, 0], positions_world[:, 1], positions_world[:, 2],
+                label='Aligned SLAM Body Trajectory', color='blue')
+        ax.scatter(*positions_world[0], color='green', label='Aligned SLAM Start')
+        ax.scatter(*positions_world[-1], color='red', label='Aligned SLAM End')
+
+        for i in range(0, len(aligned_slam_poses), args.aligned_slam):
+            draw_axes(ax, aligned_slam_poses[i], length=0.4)
 
     # --- Optitrack body frame trajectory ---
     if opti_poses and args.opti > 0:
