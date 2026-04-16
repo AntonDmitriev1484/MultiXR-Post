@@ -22,8 +22,12 @@ def define_transforms(in_kalibr):
     # Vicon coordinate frames are marked with a 'v'
 
     #Transform from vicon marker on anchor, to the center of the DW1000 UWB chip
-    T.T_vuwb_to_uwbtx = np.eye(4) # Probably better to express as a vector in the vUWB frame
-    T.T_vuwb_to_uwbtx[:3, 3] = [0.035, 0, 0] # 3cm down along x-axis.
+    # T.T_vuwb_to_uwbtx = np.eye(4) # Probably better to express as a vector in the vUWB frame
+    # T.T_vuwb_to_uwbtx[:3, 3] = [0.035, 0, 0] # 3cm down along x-axis.
+
+    #TODO: Compute this for however you set it up in optitrack
+    T.T_optiuwb_to_uwbtx = np.eye(4) # Probably better to express as a vector in the vUWB frame
+    T.T_optiuwb_to_uwbtx[:3, 3] = [0.035, 0, 0] # 3cm down along x-axis.
 
 
     # The SLAM tracked body is the left camera.
@@ -45,22 +49,6 @@ def define_transforms(in_kalibr):
          [0, 0, -1, -0.08],
          [0, 0, 0, 1]]
     )
-
-    #"Down by 2 deg"
-    # T.extra_rot = np.array([
-    #      [0.9993908270190958, -0.03489949670250097, 0, 0],
-    #      [0.03489949670250097, 0.9993908270190958, 0, 0],
-    #      [0, 0, 1, 0],
-    #      [0, 0, 0, 1]
-    # ])
-
-    #"Up by 2 deg"
-    # T.extra_rot = np.array([
-    #      [0.9993908270190958, 0.03489949670250097, 0, 0],
-    #      [-0.03489949670250097, 0.9993908270190958, 0, 0],
-    #      [0, 0, 1, 0],
-    #      [0, 0, 0, 1]
-    # ])
 
     with open(in_kalibr, 'r') as fs: calibration = yaml.safe_load(fs)
     T.T_imu_to_cam1 = np.array(calibration['cam0']['T_cam_imu'])
@@ -176,11 +164,6 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
     opti_quats = xyzw_to_wxyz(opti_quats_xyzw)
     slam_quats = xyzw_to_wxyz(slam_quats_xyzw)
 
-    print(f"{slam_poses[100, :, :]=}")
-    print(f"{slam_rot_mats[100, :, :]=}")
-    print(f"{slam_positions[100, :]=}")
-    print(f"{slam_ts[100]=}")
-
     opti_traj = PoseTrajectory3D(
         positions_xyz=opti_positions,
         orientations_quat_wxyz=opti_quats,
@@ -193,23 +176,6 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
         timestamps=slam_ts
     )
 
-    # fig = plt.figure(figsize=(8, 8))
-    # plot_mode = plot.PlotMode.xyz
-    # ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
-    # # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
-    # plot.traj(ax, plot_mode, slam_traj, "-", "blue")
-    # fig.axes.append(ax)
-    # plt.title("SLAM traj object before alignment")
-
-
-    # fig = plt.figure(figsize=(8, 8))
-    # plot_mode = plot.PlotMode.xyz
-    # ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
-    # # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
-    # plot.traj(ax, plot_mode, opti_traj, "-", "green")
-    # fig.axes.append(ax)
-    # plt.title("Optitrack traj object before alignment")
-
 
     # Time synchronization
     traj_ref, traj_est = sync.associate_trajectories(opti_traj, slam_traj, max_diff = 0.01)
@@ -218,29 +184,9 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
     traj_est.align(traj_ref, correct_scale=False)
 
 
-    # fig = plt.figure(figsize=(8, 8))
-    # plot_mode = plot.PlotMode.xyz
-    # ax = plot.prepare_axis(fig, plot_mode, subplot_arg=221)
-    # # plot.traj(ax, plot_mode, traj_ref, "--", "gray")
-    # plot.traj(ax, plot_mode, traj_est, "-", "blue")
-    # fig.axes.append(ax)
-    # plt.title("SLAM traj object after alignment")
-
-
-    # plt.show()
-
     # traj_est is now SLAM trajectory aligned to optitrack world frame
 
     traj_est_out = []
-    # Convert back to list of TUM poses
-    # for t, p, q in zip(
-    #     traj_est.timestamps,
-    #     traj_est.positions_xyz,
-    #     traj_est.orientations_quat_wxyz
-    # ):
-    #     # convert wxyz → xyzw
-    #     qx, qy, qz, qw = q[1], q[2], q[3], q[0]
-    #     traj_est_out.append([t, p[0], p[1], p[2], qx, qy, qz, qw])
 
     traj_est_out = []
 

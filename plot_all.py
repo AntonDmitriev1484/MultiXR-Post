@@ -114,7 +114,7 @@ if __name__ == "__main__":
         positions_world = np.array(positions_world)
 
         ax.plot(positions_world[:, 0], positions_world[:, 1], positions_world[:, 2],
-                label='Aligned SLAM Body Trajectory', color='blue')
+                label='Aligned SLAM Body Trajectory', color='purple')
         ax.scatter(*positions_world[0], color='green', label='Aligned SLAM Start')
         ax.scatter(*positions_world[-1], color='red', label='Aligned SLAM End')
 

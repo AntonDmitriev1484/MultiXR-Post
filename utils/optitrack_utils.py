@@ -10,11 +10,14 @@ from utils.load_rostypes import *
 from utils.ros_msg_handlers import *
 from rosbags.highlevel import AnyReader
 
+# Return trajectory of Helmet<id> and position of every anchor.
+
 def load_optitrack(bagpath, id):
 
     typestore = load_rostypes()
 
     optitrack_poses = []
+    anchor_poses = {}
 
     with AnyReader([bagpath], default_typestore=typestore) as reader:
         connections = [x for x in reader.connections if x.topic in ["/tf"]]
@@ -24,7 +27,6 @@ def load_optitrack(bagpath, id):
                 msg = reader.deserialize(rawdata, connection.msgtype)
                 
                 for tf in msg.transforms:
-                    if tf.child_frame_id != f'Helmet{id}': continue
                     t = tf.header.stamp.sec + tf.header.stamp.nanosec * 1e-9
                     tx = tf.transform.translation.x
                     ty = tf.transform.translation.y
@@ -33,14 +35,23 @@ def load_optitrack(bagpath, id):
                     qy = tf.transform.rotation.y
                     qz = tf.transform.rotation.z
                     qw = tf.transform.rotation.w
-
                     pose = np.array([t, tx, ty, tz, qx, qy, qz, qw])
-                    optitrack_poses.append(pose)
+
+                    if tf.child_frame_id == f'Helmet{id}':
+                        optitrack_poses.append(pose)
+                    elif "UWB" in tf.child_frame_id :
+                        node_id = tf.child_frame_id[3] # anchors will always be named "UWB1" etc..
+                        if anchor_poses.get(node_id) is None:
+                            anchor_poses[node_id] = [pose]
+                        else:
+                            anchor_poses[node_id].append(pose)
+                      
+
             except Exception:
                 print( "Exception! skipped message")
                 continue  # optionally log here
 
-    return optitrack_poses
+    return optitrack_poses, anchor_poses
 
 
 def euler_to_tum(arr, degrees=True):
@@ -59,7 +70,7 @@ def crop_opti(opti_data, start, end):
     opti_data = [ d for d in opti_data if start < d[0] and d[0] < end ] # Doesn't mutate vicon data
     return opti_data
 
-
+# Clean optitrack data, transformation from tracked frame to camera happens later.
 def clean_opti(opti_data):
 
     # If you're mobile and translation suddenly drop to 0, that means tracking was lost. interpolate that thang
@@ -109,8 +120,33 @@ def clean_opti(opti_data):
     opti_data = data
     return opti_data
 
+# Clean and return position of each anchors UWB transmitter in the optitrack world frame
+def compute_anchors(opti_anchor_trajectories, T_optiuwb_to_uwbtx):
+    anchor_positions = []
 
+    for id, poses in opti_anchor_trajectories.items():
 
+        poses = [pose for pose in poses if np.linalg.norm(np.array(pose)[1:]) > 1e-5] # Filter outliers
+
+        tx_positions = []
+
+        # Transform from marker frame to center of uwb transmitter.
+        # Each tx position is the UWB tag origin in the optitrack world frame
+        for pose in poses:
+            T_optiuwb_to_world = slam_quat_to_HTM(pose)
+            T_world_to_tx = T_optiuwb_to_uwbtx @ np.linalg.inv(T_optiuwb_to_world)
+            T_tx_to_world = np.linalg.inv(T_world_to_tx)
+            tx_positions.append(T_tx_to_world[:3,3])
+
+        tx_position = np.mean(np.array(tx_positions), axis=0) # Take the average position
+
+        anchor_positions.append(
+            {
+                "ID": id,
+                "position": list(tx_position)
+            }
+        )
+    return anchor_positions
 
 def get_tx_position(T_vuwb_to_uwbtx, data):
     positions = []

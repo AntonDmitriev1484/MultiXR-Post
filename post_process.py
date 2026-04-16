@@ -40,6 +40,7 @@ parser.add_argument("trial_name" , type=str)
 parser.add_argument("--calibration_file", "-c", type=str)
 parser.add_argument("--opti", nargs="?", const=0, type=float)
 parser.add_argument("--slam", nargs="?", const=0, type=float)
+# Replace SLAM tracked body in SLAM frame trajectory, with SLAM tracked body in optitrack frame trajectory
 parser.add_argument("--align", "-a", action="store_true")
 args = parser.parse_args()
 
@@ -71,9 +72,10 @@ print(f"Data duration {START} - {END}")
 
 in_opti_bagpath = Path(f"/home/antond2/ros_ws/ros2/{args.trial_name}")
 bagpath = Path(f'../collect/ros2/{args.trial_name}')
-opti_data = load_optitrack(in_opti_bagpath, ID)
-opti_data = crop_opti(opti_data, START, END)
+opti_helmet_traj, opti_anchor_trajectories = load_optitrack(in_opti_bagpath, ID)
+opti_data = crop_opti(opti_helmet_traj, START, END)
 opti_data = clean_opti(opti_data)
+
 
 
 
@@ -85,6 +87,9 @@ def filtt2(arr): # For filtering a CSV output
 
 ### Define all coordinate frames in T
 T = define_transforms(in_kalibr) #TODO: Need to revise this method for how optitrack reports
+
+# Position of each UWB anchor transmitter in the optitrack world frame
+anchor_positions = compute_anchors(opti_anchor_trajectories, T.T_optiuwb_to_uwbtx)
 
 
 ### Process SLAM data
@@ -199,7 +204,7 @@ if args.align:
             }
         } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
 
-    # Now we just subsample this to the same rate as SLAM.
+    slam_json = aligned_slam_json
 
 
 
@@ -210,7 +215,7 @@ if args.align:
 #     assisted_uwb_json = aggregate_assisted_uwb(uwb_json, vicon_tracked_body_to_my_body, np.array(vicon_data[vicon_name]), 100)
 
 # Compose the final factor graph dataset
-all_data = uwb_json + imu_json + opti_json + slam_json + aligned_slam_json
+all_data = uwb_json + imu_json + opti_json + slam_json
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -222,31 +227,8 @@ class NumpyEncoder(json.JSONEncoder):
 
 ### Copy all world information: T, anchors, apriltags, to output
 
-# if args.vicon_available:
-#     # Use Vicon information to compute the world frame for our tags and anchors
-#     world_frame_anchors = []
-#     world_frame_tags = {}
-#     for tracked_name, data in vicon_data.items():
-#         if "UWB" in tracked_name and tracked_name not in mobile_objects:
-#             # Compute the tx point over all poses, then average them.
-#             uwb_tx_position = get_tx_position(T.T_vuwb_to_uwbtx, data)
-#             world_frame_anchors.append({
-#                 "ID": tracked_name.replace("UWB", ""),
-#                 "position": uwb_tx_position
-#             })
-#         if "April" in tracked_name:
-#             # Just dump the first transform for that tag in
-#             world_frame_tags[tracked_name.replace("April","")] = slam_quat_to_HTM(data[0])[1:]
-
-#     out_anchors = open(f'{out_world}/anchors_{args.trial_name}.json', 'w')
-#     json.dump(world_frame_anchors, out_anchors, cls=NumpyEncoder, indent=1)
-#     out_anchors_trial = open(f'{outpath}/anchors.json', 'w')
-#     json.dump(world_frame_anchors, out_anchors_trial, cls=NumpyEncoder, indent=1)
-
-#     out_tags = open(f'{out_world}/apriltags_{args.trial_name}.json', 'w')
-#     json.dump(world_frame_tags, out_tags, cls=NumpyEncoder, indent=1)
-#     out_tags_trial = open(f'{outpath}/apriltags.json', 'w')
-#     json.dump(world_frame_tags, out_tags_trial, cls=NumpyEncoder, indent=1)
+out_anchors = open(f'{outpath}/anchors.json', 'w')
+json.dump(anchor_positions, out_anchors, cls=NumpyEncoder, indent=1)
 
 
 with open(f'{outpath}/transforms.json', 'w') as fs: json.dump(vars(T), fs, cls=NumpyEncoder, indent=1)
