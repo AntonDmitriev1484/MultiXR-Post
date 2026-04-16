@@ -42,6 +42,9 @@ parser.add_argument("--opti", nargs="?", const=0, type=float)
 parser.add_argument("--slam", nargs="?", const=0, type=float)
 # Replace SLAM tracked body in SLAM frame trajectory, with SLAM tracked body in optitrack frame trajectory
 parser.add_argument("--align", "-a", action="store_true")
+# Load a json file containing tracking lost segments
+parser.add_argument("--synth_failures", "-f", action="store_true")
+
 args = parser.parse_args()
 
 ID = args.id
@@ -206,6 +209,16 @@ if args.align:
 
     slam_json = aligned_slam_json
 
+
+if args.synth_failures:
+    # Go through the failure intervals, tag all poses in this interval as "lost"
+    # Later GTSAM can use this tag to not use these poses in fusion.
+    # Note: Failures are specified in s, relative to the start of the rosbag.
+    intervals = json.load(open(f'./{ID}/synth_failures/{args.trial_name}.json','r'))
+    for j in slam_json:
+        for interval in intervals:
+            if (START + interval["start"]) < j["t"] < (START+interval["end"]):
+                j["tag"] = "lost"
 
 
 # If we're using real UWB ranges, but have no compass
