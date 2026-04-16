@@ -27,6 +27,7 @@ if __name__ == "__main__":
                         help="Stride for SLAM trajectory, aligned or unaligned (0 = disable)")
     parser.add_argument("--opti", type=int, default=0,
                         help="Stride for Optitrack body trajectory (0 = disable)")
+    parser.add_argument("--anchors", action="store_true")
 
     parser.add_argument("--accel_bodyframe", action="store_true",
                         help="Display accelerometer vectors rotated into body frame")
@@ -43,12 +44,13 @@ if __name__ == "__main__":
 
     SHOW_Optitrack_STRIDE = True
 
-    all_json_path = f"./{2}/post/{args.trial_name}_post/all.json"
+    all_json_path = f"./{args.id}/post/{args.trial_name}_post/all.json"
+    anchors_path = f"./{args.id}/post/{args.trial_name}_post/anchors.json"
 
     with open(all_json_path, 'r') as f:
         all_data = json.load(f)
 
-    transforms_path = f"./{2}/post/{args.trial_name}_post/transforms.json"
+    transforms_path = f"./{args.id}/post/{args.trial_name}_post/transforms.json"
     with open(transforms_path, 'r') as f:
         Transforms = json.load(f)
     T_imu_to_body = np.array(Transforms["T_imu_to_body"])
@@ -119,7 +121,7 @@ if __name__ == "__main__":
         
         ax.scatter(*positions_world[0], color='green', label='SLAM Start')
         ax.scatter(*positions_world[-1], color='red', label='SLAM End')
-        
+
         slam_poses = [p for p in slam_poses if p is not None]
         for i in range(0, len(slam_poses), args.slam):
             draw_axes(ax, slam_poses[i], length=0.4)
@@ -178,21 +180,20 @@ if __name__ == "__main__":
 
 
     # --- Anchor positions ---
-    # anchor_path = f"../out/{args.trial_name}_post/anchors.json"
-
-    # try:
-    #     with open(anchor_path, 'r') as f:
-    #         anchor_data = json.load(f)
-    #         for d in anchor_data:
-    #             ax.scatter(d["position"][0], d["position"][1], d["position"][2], color='purple')
-    #             ax.text(
-    #                 d["position"][0],  # shift a bit in X
-    #                 d["position"][1],  # shift a bit in Y
-    #                 d["position"][2],
-    #                 d["ID"], color="black"
-    #             )
-    # except Exception as e:
-    #     print("No anchors")
+    if args.anchors:
+        try:
+            with open(anchors_path, 'r') as f:
+                anchor_data = json.load(f)
+                for d in anchor_data:
+                    ax.scatter(d["position"][0], d["position"][1], d["position"][2], color='purple')
+                    ax.text(
+                        d["position"][0],  # shift a bit in X
+                        d["position"][1],  # shift a bit in Y
+                        d["position"][2],
+                        d["ID"], color="black"
+                    )
+        except Exception as e:
+            print("No anchors")
 
     # --- Apriltag pose ---
     
