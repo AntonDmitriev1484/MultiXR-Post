@@ -23,8 +23,7 @@ import matplotlib.pyplot as plt
 # -1 plot trajectory but not coordinate frames
 # -2 don't plot trajectory
 
-PLOT_TRAJ = -1
-DONT_PLOT = -2
+DONT_PLOT=-2
 
 def plot_trial(
     id,
@@ -32,62 +31,63 @@ def plot_trial(
     slam_stride=-2,
     opti_stride=-2,
     est_stride=-2,
+    run_config="",
     anchors=False,
     transforms_json=None,
     calibration=False,
     show=True,
     ax=None
 ):
-    """
-    Reusable plotting function callable externally.
+    import json
+    import numpy as np
+    import matplotlib.pyplot as plt
 
-    Parameters
-    ----------
-    id : int
-    trial_name : str
-    slam_stride : int
-    opti_stride : int
-    anchors : bool
-    transforms_json : str | None
-    calibration : bool
-    show : bool
-        Whether to call plt.show()
-    ax : matplotlib axis | None
-        Optional axis to plot onto
-    """
+    # ------------------------------
+    # File paths
+    # ------------------------------
+    all_json_path = (
+        f"/home/antond2/Desktop/Research/MultiXR-Post/"
+        f"{id}/post/{trial_name}_post/all.json"
+    )
 
-    try:
-        all_json_path = f"/home/antond2/Desktop/Research/MultiXR-Post/{id}/post/{trial_name}_post/all.json" # Slam and optitrack both come from all_json
-        est_json_path = f"/home/antond2/Desktop/Research/gtsam_test/results/out/{trial_name}/est.json" # For single user for now
-        anchors_path = f"/home/antond2/Desktop/Research/MultiXR-Post/{id}/post/{trial_name}_post/anchors.json"
+    anchors_path = (
+        f"/home/antond2/Desktop/Research/MultiXR-Post/"
+        f"{id}/post/{trial_name}_post/anchors.json"
+    )
 
-        with open(all_json_path, "r") as f:
-            all_data = json.load(f)
+    transforms_path = (
+        f"/home/antond2/Desktop/Research/MultiXR-Post/"
+        f"{id}/post/{trial_name}_post/transforms.json"
+    )
 
-        with open(est_json_path, 'r') as f:
-            est_data = json.load(f)
+    # ------------------------------
+    # Load required data
+    # ------------------------------
+    with open(all_json_path, "r") as f:
+        all_data = json.load(f)
 
-        transforms_path = (
-            transforms_json
-            if transforms_json is not None
-            else f"/home/antond2/Desktop/Research/MultiXR-Post/{id}/post/transforms.json"
-        )
+    with open(transforms_path, "r") as f:
+        transforms = json.load(f)
 
-        with open(transforms_path, "r") as f:
-            Transforms = json.load(f)
+    T_imu_to_body = np.array(transforms["T_imu_to_body"])
 
-        T_imu_to_body = np.array(Transforms["T_imu_to_body"])
-    except Exception as e:
-        print(e)
-
+    # ------------------------------
+    # Initialize pose containers
+    # ------------------------------
     slam_poses = []
     lost_slam_poses = []
     opti_poses = []
 
-    # Load poses from post data
+    # ------------------------------
+    # Parse SLAM + OptiTrack
+    # ------------------------------
     for item in all_data:
-        if item.get("type") in ("slam_pose", "aligned_slam_pose") and "T_body_world" in item:
+        if (
+            item.get("type") in ("slam_pose", "aligned_slam_pose")
+            and "T_body_world" in item
+        ):
             pose = np.array(item["T_body_world"])
+
             if item.get("tag") == "lost":
                 slam_poses.append(None)
                 lost_slam_poses.append(pose)
@@ -95,25 +95,26 @@ def plot_trial(
                 slam_poses.append(pose)
                 lost_slam_poses.append(None)
 
-        if item.get("type") == "opti_pose" and "T_body_world" in item:
+        elif (
+            item.get("type") == "opti_pose"
+            and "T_body_world" in item
+        ):
             opti_poses.append(np.array(item["T_body_world"]))
-    
-    est_poses = []
-    # Load poses estimated by graph
-    for item in est_data:
-        if item.get("type") in ("est_pose") and "T_body_world" in item:
-            pose = np.array(item["T_body_world"])
-            est_poses.append(pose)
 
-
+    # ------------------------------
+    # Create figure if needed
+    # ------------------------------
     if ax is None:
         fig = plt.figure()
         ax = fig.add_subplot(111, projection="3d")
 
-    # --- SLAM ---
+    # ------------------------------
+    # Plot SLAM
+    # ------------------------------
     if len(slam_poses) > 0 and slam_stride != DONT_PLOT:
         positions_world = np.array([
-            np.linalg.inv(p)[:3, 3] if p is not None else [np.nan] * 3
+            np.linalg.inv(p)[:3, 3] if p is not None
+            else [np.nan, np.nan, np.nan]
             for p in slam_poses
         ])
 
@@ -121,11 +122,13 @@ def plot_trial(
             positions_world[:, 0],
             positions_world[:, 1],
             positions_world[:, 2],
-            label="SLAM", color = "blue"
+            label="SLAM",
+            color="blue"
         )
 
         lost_positions_world = np.array([
-            np.linalg.inv(p)[:3, 3] if p is not None else [np.nan] * 3
+            np.linalg.inv(p)[:3, 3] if p is not None
+            else [np.nan, np.nan, np.nan]
             for p in lost_slam_poses
         ])
 
@@ -133,19 +136,23 @@ def plot_trial(
             lost_positions_world[:, 0],
             lost_positions_world[:, 1],
             lost_positions_world[:, 2],
-            label="LOST SLAM", color = "red"
+            label="LOST SLAM",
+            color="red"
         )
 
-
         valid_slam = [p for p in slam_poses if p is not None]
+
         if slam_stride > 0:
             for i in range(0, len(valid_slam), slam_stride):
                 draw_axes(ax, valid_slam[i], length=0.4)
 
-    # --- Opti ---
+    # ------------------------------
+    # Plot OptiTrack
+    # ------------------------------
     if len(opti_poses) > 0 and opti_stride != DONT_PLOT:
         positions_world = np.array([
-            np.linalg.inv(p)[:3, 3] for p in opti_poses
+            np.linalg.inv(p)[:3, 3]
+            for p in opti_poses
         ])
 
         ax.plot(
@@ -160,193 +167,95 @@ def plot_trial(
             for i in range(0, len(opti_poses), opti_stride):
                 draw_axes(ax, opti_poses[i], length=0.4)
 
-    # --- Estimate ---
-    if len(est_poses) > 0 and est_stride != DONT_PLOT:
-        positions_world = np.array([
-            np.linalg.inv(p)[:3, 3] for p in est_poses
-        ])
+    # ------------------------------
+    # Plot estimates (optional)
+    # ------------------------------
+    if run_config != "":
+        try:
+            est_json_path = (
+                f"/home/antond2/Desktop/Research/gtsam_test/results/out/"
+                f"{trial_name}/est_{run_config}.json"
+            )
 
-        ax.plot(
-            positions_world[:, 0],
-            positions_world[:, 1],
-            positions_world[:, 2],
-            label="Estimate",
-            color="orange"
-        )
+            with open(est_json_path, "r") as f:
+                est_data = json.load(f)
 
-        if est_stride > 0:
-            for i in range(0, len(est_poses), est_stride):
-                draw_axes(ax, est_poses[i], length=0.4)
+            est_poses = []
 
+            for item in est_data:
+                if (
+                    item.get("type") == "est_pose"
+                    and "T_body_world" in item
+                ):
+                    est_poses.append(
+                        np.array(item["T_body_world"])
+                    )
+
+            if len(est_poses) > 0 and est_stride != DONT_PLOT:
+                positions_world = np.array([
+                    np.linalg.inv(p)[:3, 3]
+                    for p in est_poses
+                ])
+
+                label_text = {
+                    "no_uwb": "IMU Tracking",
+                    "uwb": "Flock Tracking"
+                }.get(run_config, run_config)
+
+                ax.plot(
+                    positions_world[:, 0],
+                    positions_world[:, 1],
+                    positions_world[:, 2],
+                    label=label_text,
+                    color="orange"
+                )
+
+                if est_stride > 0:
+                    for i in range(0, len(est_poses), est_stride):
+                        draw_axes(ax, est_poses[i], length=0.4)
+
+        except Exception as e:
+            print(
+                f"Estimate plotting failed for "
+                f"run_config='{run_config}': {e}"
+            )
+
+    # ------------------------------
+    # Anchors
+    # ------------------------------
+    if anchors:
+        try:
+            with open(anchors_path, "r") as f:
+                anchor_data = json.load(f)
+
+            for d in anchor_data:
+                pos = d["position"]
+
+                ax.scatter(pos[0], pos[1], pos[2], color="purple")
+                ax.text(pos[0], pos[1], pos[2], d["ID"])
+
+        except Exception as e:
+            print(f"Anchor plotting failed: {e}")
+
+    # ------------------------------
+    # Plot formatting
+    # ------------------------------
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
+
     ax.set_xlim(-2, 2)
-    ax.set_ylim(-2,2)
+    ax.set_ylim(-2, 2)
     ax.set_zlim(-2, 2)
-    ax.set_title(f"{all_json_path}")
-    ax.view_init(elev=20, azim=45)
+
+    ax.set_title(trial_name)
+    ax.view_init(elev=45, azim=45)
     ax.legend()
 
     if show:
         plt.show()
 
     return ax
-
-# if __name__ == "__main__":
-#     parser = argparse.ArgumentParser(description="Plot trajectory and coordinate transforms from all.json")
-
-#     parser.add_argument("id", type=int)
-#     parser.add_argument("trial_name", help="Trial name")
-
-#     # Stride-based trajectory toggles
-#     parser.add_argument("--slam", type=int, default=0,
-#                         help="Stride for SLAM trajectory, aligned or unaligned (0 = disable)")
-#     parser.add_argument("--opti", type=int, default=0,
-#                         help="Stride for Optitrack body trajectory (0 = disable)")
-#     parser.add_argument("--anchors", action="store_true")
-
-#     parser.add_argument("--transforms_json", help="Optional transforms.json file", default=None)
-#     parser.add_argument("--calibration", help="Look at calibration", action="store_true")
-
-#     args = parser.parse_args()
-
-
-#     SHOW_Optitrack_STRIDE = True
-
-#     all_json_path = f"./{args.id}/post/{args.trial_name}_post/all.json"
-#     anchors_path = f"./{args.id}/post/{args.trial_name}_post/anchors.json"
-
-#     with open(all_json_path, 'r') as f:
-#         all_data = json.load(f)
-
-#     transforms_path = f"./{args.id}/post/{args.trial_name}_post/transforms.json"
-#     with open(transforms_path, 'r') as f:
-#         Transforms = json.load(f)
-#     T_imu_to_body = np.array(Transforms["T_imu_to_body"])
-
-#     slam_poses = []
-#     lost_slam_poses = []
-
-#     synth_slam_poses = []
-#     opti_poses = []
-#     opti_ts = []
-#     Optitrack_tx_poses = []
-#     uwbmap_Optitrack_poses = []
-
-#     accel_vectors = [] # accelertion in IMU frame
-#     accel_ts = []
-#     velocity_vectors = [] # Already aligned to Optitrack poses
-
-#     for item in all_data:
-#         if (item.get("type") == "slam_pose" or item.get("type") == "aligned_slam_pose") and "T_body_world" in item:
-#             if item.get("tag") == "lost": 
-#                 slam_poses.append(None) # So that Python doesn't connect disjoint segments with lines
-#                 lost_slam_poses.append(np.array(item["T_body_world"]))  # T_world_to_body
-#             else: 
-#                 lost_slam_poses.append(None)
-#                 slam_poses.append(np.array(item["T_body_world"]))  # T_world_to_body
-
-#         if item.get("type") == "opti_pose" and "T_body_world" in item:
-#             opti_poses.append(np.array(item["T_body_world"]))  # T_world_to_body
-#             velocity_vectors.append(np.array([item["v_world"]["vx"], item["v_world"]["vy"], item["v_world"]["vz"]]))
-#             opti_ts.append(item["t"])
-#         if item.get("type") == "Optitrack_tx_pose" and "T_body_world" in item:
-#             Optitrack_tx_poses.append(np.array(item["T_body_world"]))  # T_world_to_body
-#         if item.get("type") == "assisted_uwb" and "T_body_world" in item:
-#             uwbmap_Optitrack_poses.append(np.array(item["T_body_world"]))  # T_world_to_body
-            
-#         if item.get("type") == "imu":
-#             a_vector = np.array([item["ax"], item["ay"], item["az"]])
-#             accel_vectors.append(a_vector)  # T_world_to_body
-#             accel_ts.append(item["t"])
-#         if item.get("type") == "synth_slam_pose":
-#            synth_slam_poses.append(np.array(item["T_body_world"]))  # T_world_to_body
-
-#     fig = plt.figure()
-#     ax = fig.add_subplot(111, projection='3d')
-
-#     # --- SLAM trajectory ---
-#     if slam_poses and args.slam > 0:
-#         positions_world = []
-#         for body_pose in slam_poses:
-#             if body_pose is not None:
-#                 positions_world.append(np.linalg.inv(body_pose)[:3, 3])
-#             else: 
-#                 positions_world.append(np.array([np.nan, np.nan, np.nan]))
-#         positions_world = np.array(positions_world)
-
-#         lost_positions_world = []
-#         for body_pose in lost_slam_poses:
-#             if body_pose is not None:
-#                 lost_positions_world.append(np.linalg.inv(body_pose)[:3, 3])
-#             else: 
-#                 lost_positions_world.append(np.array([np.nan, np.nan, np.nan]))
-#         lost_positions_world = np.array(lost_positions_world)
-
-#         ax.plot(positions_world[:, 0], positions_world[:, 1], positions_world[:, 2],
-#                 label='SLAM Body Trajectory', color='blue')
-#         ax.plot(lost_positions_world[:, 0], lost_positions_world[:, 1], lost_positions_world[:, 2],
-#             label='SLAM Body Trajectory', color='red')
-        
-#         ax.scatter(*positions_world[0], color='green', label='SLAM Start')
-#         ax.scatter(*positions_world[-1], color='red', label='SLAM End')
-
-#         slam_poses = [p for p in slam_poses if p is not None]
-#         for i in range(0, len(slam_poses), args.slam):
-#             draw_axes(ax, slam_poses[i], length=0.4)
-
-#     # --- Optitrack body frame trajectory ---
-#     if opti_poses and args.opti > 0:
-#         positions_world = []
-#         imu_poses = []
-#         body_poses = []
-#         for body_pose in opti_poses:
-#             positions_world.append(np.linalg.inv(body_pose)[:3, 3])
-#             body_poses.append(body_pose)
-#             imu_poses.append(np.linalg.inv(T_imu_to_body) @ body_pose)
-#         positions_world = np.array(positions_world)
-
-#         ax.plot(positions_world[:, 0], positions_world[:, 1], positions_world[:, 2],
-#                 label='Optitrack Body Trajectory', color='green')
-#         ax.scatter(*positions_world[0], color='green', marker='^', label='Optitrack Start')
-#         ax.scatter(*positions_world[-1], color='red', marker='^', label='Optitrack End')
-
-#         if args.opti > 0:
-#             for i in range(0, len(opti_poses), args.opti):
-#                 draw_axes(ax, opti_poses[i], length=0.4)
-#                 # Plotting acceleration vectors
-
-
-#     # --- Anchor positions ---
-#     if args.anchors:
-#         try:
-#             with open(anchors_path, 'r') as f:
-#                 anchor_data = json.load(f)
-#                 for d in anchor_data:
-#                     ax.scatter(d["position"][0], d["position"][1], d["position"][2], color='purple')
-#                     ax.text(
-#                         d["position"][0],  # shift a bit in X
-#                         d["position"][1],  # shift a bit in Y
-#                         d["position"][2],
-#                         d["ID"], color="black"
-#                     )
-#         except Exception as e:
-#             print("No anchors")
-
-#     # --- Apriltag pose ---
-    
-#     # Common settings
-#     ax.set_xlabel("X")
-#     ax.set_ylabel("Y")
-#     ax.set_zlabel("Z")
-#     ax.set_xlim(-2, 2)
-#     ax.set_ylim(-2,2)
-#     ax.set_zlim(-2, 2)
-#     ax.set_title(f"{all_json_path}")
-#     ax.view_init(elev=20, azim=45)
-#     ax.legend()
-#     plt.show()
 
 
 def main():
