@@ -29,13 +29,6 @@ if __name__ == "__main__":
                         help="Stride for Optitrack body trajectory (0 = disable)")
     parser.add_argument("--anchors", action="store_true")
 
-    parser.add_argument("--accel_bodyframe", action="store_true",
-                        help="Display accelerometer vectors rotated into body frame")
-    parser.add_argument("--accel_imuframe", action="store_true",
-                        help="Display raw accelerometer vectors")
-    parser.add_argument("--velocity", action="store_true",
-                        help="Display velocity vectors rotated into world frame")
-
     parser.add_argument("--transforms_json", help="Optional transforms.json file", default=None)
     parser.add_argument("--calibration", help="Look at calibration", action="store_true")
 
@@ -146,37 +139,6 @@ if __name__ == "__main__":
             for i in range(0, len(opti_poses), args.opti):
                 draw_axes(ax, opti_poses[i], length=0.4)
                 # Plotting acceleration vectors
-                skip = 100
-                accel_ts = np.array(accel_ts)
-                accel_vectors = np.array(accel_vectors)
-                for i, (imu_pose, body_pose, vts) in enumerate(zip(imu_poses, body_poses, opti_ts)):
-                    if i % skip == 0:
-                        # Find closest accelerometer measurement to pose
-                        idx = np.argmin(np.abs(vts -accel_ts))
-
-                        # Plot that vector in the body frame
-                        if args.accel_bodyframe:
-                            accel_vector_imu_frame = accel_vectors[idx] / np.linalg.norm(accel_vectors[idx]) #unit vector
-                            T_body_to_world = np.linalg.inv(body_pose)
-                            accel_vector_world_frame = T_body_to_world[:3, :3] @ T_imu_to_body[:3,:3] @ (-1 * accel_vector_imu_frame) # rotate vector into world frame
-                            origin = np.linalg.inv(body_pose)[:3,3]
-                            ax.quiver(*origin, *accel_vector_world_frame, color='purple', length=0.3 )
-
-                        if args.accel_imuframe:
-                            # Plot vector in the IMU frame
-                            accel_vector_imu_frame = accel_vectors[idx] / np.linalg.norm(accel_vectors[idx]) #unit vector
-                            T_imu_to_world = np.linalg.inv(imu_pose)
-                            accel_vector_world_frame = T_imu_to_world[:3,:3] @ (-1 * accel_vector_imu_frame) # rotate vector into world frame
-                            origin = np.linalg.inv(imu_pose)[:3,3]
-                            ax.quiver(*origin, *accel_vector_world_frame, color='purple', length=0.3 )
-
-                if args.velocity:
-                    skip = 100
-                    for i, (vpose, velocity_vector) in enumerate(zip(opti_poses, velocity_vectors)):
-                        if i % skip == 0:
-                            v = velocity_vector / 9
-                            origin = np.linalg.inv(vpose)[:3,3]
-                            ax.quiver(*origin, *v, color='pink', length=0.3 )
 
 
     # --- Anchor positions ---
