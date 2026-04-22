@@ -263,4 +263,7 @@ all_data = filtt(all_data)
 all_data = sorted(all_data, key=lambda x: x["t"])
 
 json.dump(all_data, open(outpath+"/all.json", 'w'), cls=NumpyEncoder, indent=1)
-# json.dump(priors, open(outpath+"/priors.json", 'w'), cls=NumpyEncoder, indent=1)
+
+# Write body in optitrack trajectory  to a csv file for loading into EVO
+# Note does evo expect time in s, ms, or ns?
+np.savetxt(f"{outpath}/opti.txt", np.array(body_opti_tum_traj), fmt="%.8f")
