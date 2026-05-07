@@ -13,36 +13,22 @@ from evo.core.trajectory import PoseTrajectory3D
 from evo.tools import plot
 import matplotlib.pyplot as plt
 
-
+# Note; By default SLAM tracked body frame is the left camera
+# A SLAM trajectory is T_leftcam_in_slamframe
 def define_transforms(in_kalibr):
     T = SimpleNamespace()
 
-    # Transform from vicon marker on helmet, to center of RS camera (body frame)
-
-    # Vicon coordinate frames are marked with a 'v'
-
-    #Transform from vicon marker on anchor, to the center of the DW1000 UWB chip
-    # T.T_vuwb_to_uwbtx = np.eye(4) # Probably better to express as a vector in the vUWB frame
-    # T.T_vuwb_to_uwbtx[:3, 3] = [0.035, 0, 0] # 3cm down along x-axis.
-
-    #TODO: Compute this for however you set it up in optitrack
+    # Transform from optitrack UWB anchor markers to UWB antenna.
+    # TODO: Verify by hand
     T.T_optiuwb_to_uwbtx = np.eye(4) # Probably better to express as a vector in the vUWB frame
-    T.T_optiuwb_to_uwbtx[:3, 3] = [0.035, 0, 0] # 3cm down along x-axis.
-
-
-    # The SLAM tracked body is the left camera.
+    T.T_optiuwb_to_uwbtx[:3, 3] = [0.045, 0.04, 0] # 3cm down along x-axis.
 
     # 'Head' refers to the vicon tracked head pose
     T.T_imu_to_body = np.eye(4)
     T.T_body_to_imu = np.linalg.inv(T.T_imu_to_body)
 
-    # T_cam1_to_head = np.array([[-1 , 0, 0, 0.0175],
-    #                         [0, 0, -1, -0.08],
-    #                         [0, -1, 0, 0],
-    #                         [0, 0, 0, 1]])
-    # T.T_head_to_cam1 = np.linalg.inv(T_cam1_to_head)
-
-    #TODO: Verify by hand
+    # Transform from head tracking optitrack markers to left camera
+    # TODO: Verify by hand
     T.T_head_to_cam1 = np.array(
         [[-1, 0, 0, 0],
          [0, 1, 0, 0.0175],
@@ -53,18 +39,30 @@ def define_transforms(in_kalibr):
     with open(in_kalibr, 'r') as fs: calibration = yaml.safe_load(fs)
     T.T_imu_to_cam1 = np.array(calibration['cam0']['T_cam_imu'])
     T.T_cam1_to_body = T.T_imu_to_body @ np.linalg.inv(T.T_imu_to_cam1)
-    # T.T_head_to_body = T.T_cam1_to_body @ T.extra_rot @ T.T_head_to_cam1
     T.T_head_to_body = T.T_cam1_to_body @ T.T_head_to_cam1
 
-    # T.T_head_to_body = np.linalg.inv(T.T_imu_to_cam1) @ T.T_head_to_cam1 @ n
-
-
+    # Would only change if you're using vicon2gt
     T.T_inertial_to_world = np.eye(4)
 
+    # Transform from head tracking optitrack markers to decawave antenna
+    # TODO: Verify by hand
 
-    T_decawave_to_head = np.eye(4)
-    T_decawave_to_head[:3,3] = np.array([-0.01, -0.0175, 0.0525])
-    T.T_head_to_decawave = np.linalg.inv(T_decawave_to_head)
+    T.T_head_to_decawave = np.array(
+        [
+         [1, 0, 0, 0.01],
+         [0, 1, 0, 0.0525],
+         [0, 0, 1, 0.0175],
+         [0, 0, 0, 1]
+        ]
+    )
+
+    # From old Vicon code
+    # T_decawave_to_head = np.eye(4)
+    # T_decawave_to_head[:3,3] = np.array([-0.01, -0.0175, 0.0525])
+    # T.T_head_to_decawave = np.linalg.inv(T_decawave_to_head)
+    
+    # GTSAM expects the "pose of object in body frame"
+    # i.e. T_decawave_to_body, but I can do that invert in C++
     T.T_body_to_decawave = T.T_head_to_decawave @ np.linalg.inv(T.T_head_to_body)
 
     return T

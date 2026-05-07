@@ -142,7 +142,7 @@ def compute_anchors(opti_anchor_trajectories, T_optiuwb_to_uwbtx):
 
         anchor_positions.append(
             {
-                "ID": id,
+                "ID": int(id),
                 "position": list(tx_position)
             }
         )

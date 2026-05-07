@@ -88,7 +88,7 @@ def plot_trial(
         ):
             pose = np.array(item["T_body_world"])
 
-            if item.get("tag") == "lost":
+            if item.get("status") == "lost":
                 slam_poses.append(None)
                 lost_slam_poses.append(pose)
             else:
@@ -123,7 +123,7 @@ def plot_trial(
             positions_world[:, 1],
             positions_world[:, 2],
             label="SLAM",
-            color="blue"
+            color="green"
         )
 
         lost_positions_world = np.array([
@@ -160,7 +160,7 @@ def plot_trial(
             positions_world[:, 1],
             positions_world[:, 2],
             label="Optitrack",
-            color="green"
+            color="lightgreen"
         )
 
         if opti_stride > 0:
@@ -202,13 +202,22 @@ def plot_trial(
                     "uwb": "Flock Tracking"
                 }.get(run_config, run_config)
 
-                ax.plot(
+                ax.scatter(
                     positions_world[:, 0],
                     positions_world[:, 1],
                     positions_world[:, 2],
                     label=label_text,
-                    color="orange"
+                    color="purple",
+                    s=0.5
                 )
+
+                # ax.plot(
+                #     positions_world[:, 0],
+                #     positions_world[:, 1],
+                #     positions_world[:, 2],
+                #     label=label_text,
+                #     color="orange"
+                # )
 
                 if est_stride > 0:
                     for i in range(0, len(est_poses), est_stride):

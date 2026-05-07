@@ -24,6 +24,7 @@ from utils.ros_msg_handlers import *
 from utils.math_utils import *
 from utils.vicon_utils import *
 from utils.optitrack_utils import *
+from utils.uwb_utils import *
 
 
 import matplotlib.pyplot as plt
@@ -93,11 +94,12 @@ T = define_transforms(in_kalibr) #TODO: Need to revise this method for how optit
 
 # Position of each UWB anchor transmitter in the optitrack world frame
 anchor_positions = compute_anchors(opti_anchor_trajectories, T.T_optiuwb_to_uwbtx)
-
+print(f"{anchor_positions=}")
 
 ### Process SLAM data
 slam_json = []
 body_slam_tum_traj = [] # Preparing for later alignment
+body_slam_inv_tum_traj = [] # Preparing for later alignment
 body_slam_HTMs = []
 
 if args.slam is not None:
@@ -117,7 +119,13 @@ if args.slam is not None:
 
     # aggregate_tracker returns [timestamp, flattened HTM]
     # for slam_tum_traj we need to convert back to tum
-    for pose in slam_body_poses: body_slam_tum_traj.append(slam_HTM_to_TUM(pose))
+    for pose in slam_body_poses: 
+        body_slam_tum_traj.append(slam_HTM_to_TUM(pose))
+
+        timestamp = pose[0]
+        tum_vec = HTM_to_TUM(np.linalg.inv(pose[1:].reshape(4, 4) ))       # should return (7,) → [tx, ty, tz, qx, qy, qz, qw]
+        result = np.concatenate(([timestamp], tum_vec))  # shape (8,)
+        body_slam_inv_tum_traj.append(result)
 
     # If we passed a valid frequency to subsample to
     slam_freq = len(slam_data) / (END-START)
@@ -141,7 +149,8 @@ if args.slam is not None:
 
 ### Process optitrack data
 opti_json = []
-body_opti_tum_traj = []
+body_opti_tum_traj = [] # Explain: My default pose output so I can automate evo in eval.py
+body_opti_inv_tum_traj = [] # Explain: Inverted pose output so I can run command line evo checks
 body_opti_HTMs = []
 if args.opti is not None:
     def opti_tracked_body_to_my_body(T_head_to_world):
@@ -157,7 +166,13 @@ if args.opti is not None:
 
     # aggregate_tracker returns [timestamp, flattened HTM]
     # for opti_tum_traj we need to convert back to tum
-    for pose in opti_body_poses: body_opti_tum_traj.append(slam_HTM_to_TUM(pose))
+    for pose in opti_body_poses: 
+        body_opti_tum_traj.append(slam_HTM_to_TUM(pose))
+
+        timestamp = pose[0]
+        tum_vec = HTM_to_TUM(np.linalg.inv(pose[1:].reshape(4, 4) ))       # should return (7,) → [tx, ty, tz, qx, qy, qz, qw]
+        result = np.concatenate(([timestamp], tum_vec))  # shape (8,)
+        body_opti_inv_tum_traj.append(result)
 
     # If we passed a valid frequency to subsample to
     opti_freq = len(opti_data) / (END-START)
@@ -218,17 +233,17 @@ if args.synth_failures:
     for j in slam_json:
         for interval in intervals:
             if (START + interval["start"]) < j["t"] < (START+interval["end"]):
-                j["tag"] = "lost"
+                j["status"] = "lost"
+            else:
+                j["status"] = "tracking"
 
 
-# If we're using real UWB ranges, but have no compass
-# We interpolate on SLAM poses to match a synthetic orientation to that UWB range
-# assisted_uwb_json = []
-# if args.map_vicon_to_uwb:
-#     assisted_uwb_json = aggregate_assisted_uwb(uwb_json, vicon_tracked_body_to_my_body, np.array(vicon_data[vicon_name]), 100)
+synth_uwb_json = []
+# synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, outpath)
 
 # Compose the final factor graph dataset
-all_data = uwb_json + imu_json + opti_json + slam_json
+
+all_data = uwb_json + imu_json + opti_json + slam_json + synth_uwb_json
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -240,6 +255,7 @@ class NumpyEncoder(json.JSONEncoder):
 
 ### Copy all world information: T, anchors, apriltags, to output
 
+
 out_anchors = open(f'{outpath}/anchors.json', 'w')
 json.dump(anchor_positions, out_anchors, cls=NumpyEncoder, indent=1)
 
@@ -248,7 +264,8 @@ with open(f'{outpath}/transforms.json', 'w') as fs: json.dump(vars(T), fs, cls=N
 
 # Run sanity check to make sure measurements are at the frequency we expect them to be before testing in the graph
 
-print("Checking frequency of real data")
+print("Checking frequency of input data")
+print(f" Measured Synth UWB frequency {len(synth_uwb_json) / (END-START)}")
 print(f" Measured UWB frequency {len(uwb_json) / (END-START)}")
 print(f" Measured optitrack frequency {len(opti_data) / (END-START)}")
 print(f" Measured SLAM frequency {len(slam_data) / (END-START)}")
@@ -267,3 +284,5 @@ json.dump(all_data, open(outpath+"/all.json", 'w'), cls=NumpyEncoder, indent=1)
 # Write body in optitrack trajectory  to a csv file for loading into EVO
 # Note does evo expect time in s, ms, or ns?
 np.savetxt(f"{outpath}/opti.txt", np.array(body_opti_tum_traj), fmt="%.8f")
+np.savetxt(f"{outpath}/opti_inv.txt", np.array(body_opti_inv_tum_traj), fmt="%.8f")
+np.savetxt(f"{outpath}/slam_inv.txt", np.array(body_slam_inv_tum_traj), fmt="%.8f")
