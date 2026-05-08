@@ -76,6 +76,7 @@ def clean_opti(opti_data):
     # If you're mobile and translation suddenly drop to 0, that means tracking was lost. interpolate that thang
 
     data = opti_data
+    # if opti_data == []: return
 
     # In case we start off at a 0 pose, find the first non-zero pose
     # and set that to be our start pose
