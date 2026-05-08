@@ -32,6 +32,7 @@ def plot_trial(
     opti_stride=-2,
     est_stride=-2,
     run_config="",
+    label_text="",
     anchors=False,
     transforms_json=None,
     calibration=False,
@@ -197,10 +198,6 @@ def plot_trial(
                     for p in est_poses
                 ])
 
-                label_text = {
-                    "no_uwb": "IMU Tracking",
-                    "uwb": "Flock Tracking"
-                }.get(run_config, run_config)
 
                 ax.scatter(
                     positions_world[:, 0],
