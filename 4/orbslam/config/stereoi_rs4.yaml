@@ -8,42 +8,42 @@ File.version: "1.0"
 Camera.type: "PinHole"
 
 # Left Camera calibration and distortion parameters (OpenCV)
-Camera1.fx: 372.43209396227445
-Camera1.fy: 373.0283482581501
-Camera1.cx: 323.8237139121224
-Camera1.cy: 237.9313960283576
+Camera1.fx: 385.3611656134701
+Camera1.fy: 386.27203140371165
+Camera1.cx: 321.3031130046934
+Camera1.cy: 234.31929677859483
 
 # Pinhole distortion parameters
-Camera1.k1: -0.010184013476894292
-Camera1.k2: -0.0014820857722126148
-Camera1.p1: -0.001870014949178625
-Camera1.p2: 0.0006654197579229624
+Camera.k1: 0.003293802203676787
+Camera.k2: -0.0008986445461451523
+Camera.p1: 0.00000981141488955127
+Camera.p2: 0.0000007814611767280166
 
 # Right Camera calibration and distortion parameters (OpenCV)
-Camera2.fx: 371.9412029219185
-Camera2.fy: 372.50735733834154
-Camera2.cx: 325.2740409990313
-Camera2.cy: 237.52454415471811
+Camera2.fx: 385.16363484248285
+Camera2.fy: 386.13479457434124
+Camera2.cx: 320.32213563911364
+Camera2.cy: 234.3437420781108
 
 # Pinhole distortion parameters
-Camera2.k1: -0.007186334508861882
-Camera2.k2: -0.004637753127003038
-Camera2.p1: -0.0019270211610483369
-Camera2.p2: 0.0006874212201972834
+Camera.k1: 0.01839345204765405
+Camera.k2: -0.002663469387161469
+Camera.p1: 0.000017624116097132693
+Camera.p2: -0.0003293386821552823
 
-# Kalibr gives transform from left camera to right camera,
-# This is directly provided in nuc3_trial_1-report-imucam.pdf
+# Kalibr only gives transform from left camera to right camera,
+# We need to invert that to get this:
+# Transformation matrix from right camera to left camera
+
+# Same as cam1: T_cn_cnm1
 Stereo.T_c1_c2: !!opencv-matrix
   rows: 4
   cols: 4
   dt: f
-  data:
-    [
-      0.9999943499537441, 0.0003104788274457673, -0.003347187398289457, -0.0501160864293067,
-      -0.0003109838307374656, 0.9999999403412829, -0.00015035451606191228, -3.180718885913244e-05,
-      0.0033471405167067154, 0.00015139458771125852, 0.9999943868492629, -0.00047510728369423315,
-      0.0, 0.0, 0.0, 1.0
-    ]
+  data: [0.9999943499537441, 0.0003104788274457673, -0.003347187398289457, -0.0501160864293067,
+         -0.0003109838307374656, 0.9999999403412829, -0.00015035451606191228, -3.180718885913244e-05,
+         0.0033471405167067154, 0.00015139458771125852, 0.9999943868492629, -0.00047510728369423315,
+         0.0, 0.0, 0.0, 1.0]
 
 # Overlapping area between images (to be updated)
 #Camera1.overlappingBegin: 0
@@ -69,29 +69,26 @@ Stereo.ThDepth: 50.0
 # IMU Parameters
 #--------------------------------------------------------------------------------------------
 
+# Inverse of cam0: T_cam_imu
 # Transformation from body-frame (imu) to left camera
-# This is given directly in nuc3_trial_1-report-imucam.pdf
 IMU.T_b_c1: !!opencv-matrix
-  rows: 4
-  cols: 4
-  dt: f
-  data:
-    [
-      0.9999792916583793, -0.00630935729775247, 0.0012681738425422806, 0.005094254322024484,
-      0.006299322648145304, 0.9999499966904588, 0.007766765924482546, -0.005454191759019972,
-      -0.0013171137309186491, -0.007758616451432384, 0.9999690340616448, -0.026401055048933034,
-      0.0, 0.0, 0.0, 1.0
-    ]
+   rows: 4
+   cols: 4
+   dt: f
+   data: [0.99997929, 0.00629932, -0.00131711, -0.00509456,
+          -0.00630936, 0.99995000, -0.00775862, 0.00528122,
+          0.00126817, 0.00776677, 0.99996903, 0.02643614,
+          0.00000000, 0.00000000, 0.00000000, 1.00000000]
 
 # Do not insert KFs when recently lost
 IMU.InsertKFsWhenLost: 0
 
 # IMU noise
 # Should I be passing in the regular noise density or discrete noise density???
-IMU.NoiseGyro: 0.002049600985797649   # rad/s^0.5
-IMU.NoiseAcc: 0.02064189891192468     # m/s^1.5
-IMU.GyroWalk: 0.00003199855545594742  # rad/s^1.5
-IMU.AccWalk: 0.0022919238444020808    # m/s^2.5
+IMU.NoiseGyro: 0.002049600985797649 # rad/s^0.5
+IMU.NoiseAcc: 0.02064189891192468 # m/s^1.5
+IMU.GyroWalk: 0.00003199855545594742 # rad/s^1.5
+IMU.AccWalk: 0.0022919238444020808 # m/s^2.5
 IMU.Frequency: 200.0
 
 #--------------------------------------------------------------------------------------------
@@ -99,9 +96,8 @@ IMU.Frequency: 200.0
 #--------------------------------------------------------------------------------------------
 
 # ORB Extractor: Number of features per image
-ORBextractor.nFeatures: 1500
-
-# ORBextractor.nFeatures: 2000 # Tested with 1250
+ORBextractor.nFeatures: 1500 # Tested with 1250
+#ORBextractor.nFeatures: 2000 # Tested with 1250
 
 # ORB Extractor: Scale factor between levels in the scale pyramid
 ORBextractor.scaleFactor: 1.2

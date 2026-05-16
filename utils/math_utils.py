@@ -9,6 +9,7 @@ import yaml
 # Imports do work, even if not detected
 from evo.core import trajectory
 from evo.core import sync
+from evo.core import metrics
 from evo.core.trajectory import PoseTrajectory3D
 from evo.tools import plot
 import matplotlib.pyplot as plt
@@ -133,6 +134,20 @@ def interpolate_pose(first_pose, first_timestamp, second_pose, second_timestamp,
 
     return interp_pose
 
+def dump_stats(traj_ref_sync, traj_est_sync):
+
+    # Translation APE
+    ape_metric_trans = metrics.APE(metrics.PoseRelation.translation_part)
+    ape_metric_trans.process_data((traj_ref_sync, traj_est_sync))
+    ape_stats = ape_metric_trans.get_all_statistics()
+    print(f"    Translation APE,\n\t{ape_stats["mean"]=},\n\t{ape_stats["rmse"]=}")
+
+    # Rotation APE
+    ape_metric_rot = metrics.APE(metrics.PoseRelation.rotation_angle_deg)
+    ape_metric_rot.process_data((traj_ref_sync, traj_est_sync))
+    ape_stats = ape_metric_rot.get_all_statistics()
+    # print(f" Rotational APE {json.dumps(ape_stats, indent=1)}")
+    print(f"    Rotation APE,\n\t{ape_stats["mean"]=},\n\t{ape_stats["rmse"]=}")
 
 # These get passed in as lists of 1 x 17 numpy arrays
 def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
@@ -179,12 +194,12 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
     traj_ref, traj_est = sync.associate_trajectories(opti_traj, slam_traj, max_diff = 0.01)
 
     # Align (SE3)
-    traj_est.align(traj_ref, correct_scale=False)
+    traj_est.align(traj_ref, correct_scale=True)
 
+    print(f"Umeyama Alignment Results:")
+    dump_stats(traj_ref, traj_est)
 
     # traj_est is now SLAM trajectory aligned to optitrack world frame
-
-    traj_est_out = []
 
     traj_est_out = []
 

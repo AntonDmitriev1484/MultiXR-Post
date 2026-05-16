@@ -1,5 +1,6 @@
 import numpy as np
 from utils.math_utils import *
+import matplotlib.pyplot as plt
 import json
 
 # Body (IMU) trajectory in world frame
@@ -244,3 +245,108 @@ def range_synthesizer2(START, END, body_traj, T, outpath, f_uwb=5, std=0.2):
     json.dump(write_anchors, out_anchors, cls=NumpyEncoder, indent=1)
 
     return synth_ranges
+
+
+
+
+# Compute range error for inter-user and user-anchor ranges.
+def error_analysis( id, multi_all, anchors, gt_trajectories, T):
+
+    mobile_nodes = [2,3,4]
+    # First transform body_traj to uwb_rx_traj
+
+    range_errors = {}
+    nlos_metric = {}
+
+    for j in multi_all:
+        if j["src"] == id and j["type"] == "uwb":
+
+            if j["id"] in mobile_nodes:
+
+                other_body_traj = np.array(gt_trajectories[j["id"]-2])
+                body_traj = np.array(gt_trajectories[j["src"]-2])
+
+                idx = np.argmin(np.abs(body_traj[:, 0] - t))
+                T_world_to_body_tum = body_traj[idx]
+                T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+                T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+                T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
+                tx_position = T_decawave_to_world[:3,3]
+
+                idx = np.argmin(np.abs(other_body_traj[:, 0] - t))
+                T_world_to_body_tum = other_body_traj[idx]
+                T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+                T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+                T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
+                other_tx_position = T_decawave_to_world[:3,3]
+
+                synth_range = np.linalg.norm(tx_position -  other_tx_position)
+                mes_range = j["range"]
+
+                range_errors.setdefault(j["id"], []).append(np.abs(synth_range - mes_range))
+
+                A = 121.74
+
+                fp_power_ = 10 * np.log10( ((j["firstpathamp1"] ** 2) + (j["firstpathamp2"]**2) + (j["firstpathamp3"]**2)) 
+                                        / (j["rxpreamcount"]**2) ) - A
+                rx_power_ = 10 * np.log10( j["maxgrowthcir"] * (2**17) / (j["rxpreamcount"] ** 2)) - A
+                
+                nlos_metric.setdefault(j["id"], []).append(rx_power_ - fp_power_)
+
+            else:
+
+                dest_position = [x['position'] for x in anchors if x['ID']== j['id']][0]
+
+                t = j["t"]
+                body_traj = np.array(gt_trajectories[j["src"]-2])
+
+                idx = np.argmin(np.abs(body_traj[:, 0] - t))
+
+                T_world_to_body_tum = body_traj[idx]
+                T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+                
+                T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+                T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
+
+                source_position = T_decawave_to_world[:3,3] # Physical antenna position in world frame
+                # source_position = np.linalg.inv(T_world_to_body)[:3,3]# body position in world frame (if just using RangeFactor)
+
+                synth_range = np.linalg.norm(dest_position -  source_position)
+                mes_range = j["range"]
+
+                range_errors.setdefault(j["id"], []).append(np.abs(synth_range - mes_range))
+
+
+                A = 121.74
+
+                fp_power_ = 10 * np.log10( ((j["firstpathamp1"] ** 2) + (j["firstpathamp2"]**2) + (j["firstpathamp3"]**2)) 
+                                        / (j["rxpreamcount"]**2) ) - A
+                rx_power_ = 10 * np.log10( j["maxgrowthcir"] * (2**17) / (j["rxpreamcount"] ** 2)) - A
+
+                nlos_metric.setdefault(j["id"], []).append(rx_power_ - fp_power_)
+
+
+    for node, err in range_errors.items():
+
+        if node == id:
+            continue
+
+        fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+
+        axs[0].plot(err)
+        axs[0].set_title(f"Range Errors from {id} to {node}")
+        axs[0].set_ylabel("Error (m)")
+        axs[0].grid(True)
+
+        nlos_score = nlos_metric[node]
+
+        axs[1].plot(nlos_score if np.ndim(nlos_score) > 0 else [nlos_score]*len(err))
+
+        axs[1].set_title("NLOS Metric")
+        axs[1].set_xlabel("Range #")
+        axs[1].set_ylabel("NLOS score")
+        axs[1].grid(True)
+
+        plt.tight_layout()
+
+    plt.show()

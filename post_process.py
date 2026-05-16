@@ -61,17 +61,19 @@ def post_process(args):
 
 
     # # Filter for messages within bag timestamp range.
-    START = metadata["start_ns"] * 1e-9
+    # START = metadata["start_ns"] * 1e-9
+
+    slam_data = np.loadtxt(in_slam)
+    START = slam_data[0,0] * 1e-9 # Adjust timestamps to be in 's'
+
     END = metadata["end_ns"] * 1e-9
     print(f"Data duration {START} - {END}")
 
 
     in_opti_bagpath = Path(f"/home/antond2/ros_ws/ros2/{args.trial_name}")
-    bagpath = Path(f'../collect/ros2/{args.trial_name}')
     opti_helmet_traj, opti_anchor_trajectories = load_optitrack(in_opti_bagpath, ID)
     opti_data = crop_opti(opti_helmet_traj, START, END)
     opti_data = clean_opti(opti_data)
-
 
 
 
@@ -86,7 +88,6 @@ def post_process(args):
 
     # Position of each UWB anchor transmitter in the optitrack world frame
     anchor_positions = compute_anchors(opti_anchor_trajectories, T.T_optiuwb_to_uwbtx)
-    print(f"{anchor_positions=}")
 
     ### Process SLAM data
     slam_json = []
@@ -183,10 +184,48 @@ def post_process(args):
                         "vz": float(body_v[3])
                 }
             } for body_pose, body_v in zip( list(opti_body_poses), list(opti_body_velocities))]
-        
+    
 
+    # imu_ts = [x["t"] for x in imu_json]
+    # opti_ts = [x[0] for x in body_opti_HTMs]
+
+    # plt.figure(figsize=(10, 2))
+
+    # # Plot IMU timestamps at y=1
+    # plt.scatter(
+    #     imu_ts,
+    #     np.ones_like(imu_ts),
+    #     s=5,
+    #     alpha=0.6,
+    #     c="blue",
+    #     label="IMU timestamps"
+    # )
+
+    # # Plot Optitrack timestamps at y=0
+    # plt.scatter(
+    #     opti_ts,
+    #     np.zeros_like(opti_ts),
+    #     s=5,
+    #     alpha=0.6,
+    #     c="green",
+    #     label="Optitrack timestamps"
+    # )
+
+    # plt.yticks([0, 1], ["Optitrack", "IMU"])
+
+    # plt.xlabel("Timestamp (s)")
+    # plt.title("IMU vs Optitrack timestamps")
+
+    # plt.grid(True, axis="x")
+
+    # plt.legend()
+
+    
     aligned_slam_json = []
     if args.align:
+        
+        # body_opti_HTMs = [x for x in body_opti_HTMs if (body_slam_HTMs[0,0] <= x[0]) and ( x[0] <= body_slam_HTMs[-1,0])]
+
         # Align the body's SLAM trajectory to the Optitrack trajectory
         # Places our SLAM trajectory in a shared coordinate frame
         body_slam_aligned_tum_traj = umeyama_alignment(body_opti_HTMs, body_slam_HTMs)
@@ -214,8 +253,6 @@ def post_process(args):
                 }
             } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
 
-        slam_json = aligned_slam_json
-
 
     if args.synth_failures:
         # Go through the failure intervals, tag all poses in this interval as "lost"
@@ -229,17 +266,21 @@ def post_process(args):
                 else:
                     j["status"] = "tracking"
 
+            if len(intervals) == 0: 
+                for j in slam_json: j["status"] = "tracking"
+
+    else:
+        for j in slam_json: j["status"] = "tracking"
+
 
     synth_uwb_json = []
-    # synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, outpath)
-
+    # synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, outpath)\\
+    
     # Compose the final factor graph dataset
-
-    all_data = uwb_json + imu_json + opti_json + slam_json + synth_uwb_json
-
+    all_data = uwb_json + imu_json + opti_json + slam_json + synth_uwb_json + aligned_slam_json
+    for mes in all_data: mes["src"] = ID
 
     ### Copy all world information: T, anchors, apriltags, to output
-
 
     out_anchors = open(f'{outpath}/anchors.json', 'w')
     json.dump(anchor_positions, out_anchors, cls=NumpyEncoder, indent=1)
@@ -272,7 +313,7 @@ def post_process(args):
     np.savetxt(f"{outpath}/opti_inv.txt", np.array(body_opti_inv_tum_traj), fmt="%.8f")
     np.savetxt(f"{outpath}/slam_inv.txt", np.array(body_slam_inv_tum_traj), fmt="%.8f")
 
-    return all, anchor_positions, T
+    return all_data, anchor_positions, T, body_opti_tum_traj
 
 if __name__ == "__main__":
     # Example usage:
@@ -295,6 +336,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--multi_merge", action="store_true")
 
+    parser.add_argument("--check_uwb_error", action="store_true")
+
     args = parser.parse_args()
 
     if args.multi_merge:
@@ -303,19 +346,30 @@ if __name__ == "__main__":
         os.makedirs(outpath, exist_ok=True)
 
         merged_all = []
-        for user in [2,3,4]:
+        gt_trajectories = []
+        
+        for user in [2,3,4]: # Hard coded removing 3 for opti_multi1
+            print(f"\nNUC{user}\n")
+
             args.id = user # Override whatever ID gets passed in
-            all, anchor_positions, T = post_process(args)
+            all, anchor_positions, T, body_opti_tum_traj = post_process(args)
+            merged_all = merged_all + all
+            gt_trajectories.append(body_opti_tum_traj)
 
             # Record anchors
             if user==2: json.dump(anchor_positions, open(outpath+"/anchors.json", 'w'), cls=NumpyEncoder, indent=1)
 
             # Record transforms
             json.dump(vars(T), open(f'{outpath}/transforms{user}.json', 'w'), cls=NumpyEncoder, indent=1)
+            
 
         # super_all = filtt(super_all) # TODO: Filter all data to fit within the smallest start timestamp.
         merged_all = sorted(merged_all, key=lambda x: x["t"])
         json.dump(merged_all, open(outpath+"/all.json", 'w'), cls=NumpyEncoder, indent=1)
+
+        # UWB error analysis
+        if args.check_uwb_error:
+            error_analysis(4, merged_all, anchor_positions, gt_trajectories, T)
 
     else:
         post_process(args)

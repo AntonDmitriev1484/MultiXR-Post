@@ -31,6 +31,7 @@ def plot_trial(
     slam_stride=-2,
     opti_stride=-2,
     est_stride=-2,
+    est_path=None,          # <-- added
     run_config="",
     label_text="",
     anchors=False,
@@ -79,28 +80,42 @@ def plot_trial(
     lost_slam_poses = []
     opti_poses = []
 
+    aligned_slam_poses = []
+    lost_aligned_slam_poses = []
+
     # ------------------------------
     # Parse SLAM + OptiTrack
     # ------------------------------
     for item in all_data:
         if (
-            item.get("type") in ("slam_pose", "aligned_slam_pose")
+            item.get("type") in ("slam_pose")
             and "T_body_world" in item
         ):
             pose = np.array(item["T_body_world"])
-
             if item.get("status") == "lost":
                 slam_poses.append(None)
                 lost_slam_poses.append(pose)
             else:
                 slam_poses.append(pose)
                 lost_slam_poses.append(None)
-
+        elif ( item.get("type") == "aligned_slam_pose"):
+            pose = np.array(item["T_body_world"])
+            if item.get("status") == "lost":
+                aligned_slam_poses.append(None)
+                lost_aligned_slam_poses.append(pose)
+            else:
+                aligned_slam_poses.append(pose)
+                lost_aligned_slam_poses.append(None)
         elif (
             item.get("type") == "opti_pose"
             and "T_body_world" in item
         ):
             opti_poses.append(np.array(item["T_body_world"]))
+
+    # Aligned SLAM will automatically overrule regular SLAM in plotting
+    if len(aligned_slam_poses) > 0:
+        slam_poses = aligned_slam_poses
+        lost_slam_poses = lost_aligned_slam_poses
 
     # ------------------------------
     # Create figure if needed
@@ -171,14 +186,9 @@ def plot_trial(
     # ------------------------------
     # Plot estimates (optional)
     # ------------------------------
-    if run_config != "":
+    if est_path is not None:
         try:
-            est_json_path = (
-                f"/home/antond2/Desktop/Research/gtsam_test/results/out/"
-                f"{trial_name}/est_{run_config}.json"
-            )
-
-            with open(est_json_path, "r") as f:
+            with open(est_path, "r") as f:
                 est_data = json.load(f)
 
             est_poses = []
@@ -198,7 +208,6 @@ def plot_trial(
                     for p in est_poses
                 ])
 
-
                 ax.scatter(
                     positions_world[:, 0],
                     positions_world[:, 1],
@@ -208,23 +217,12 @@ def plot_trial(
                     s=0.5
                 )
 
-                # ax.plot(
-                #     positions_world[:, 0],
-                #     positions_world[:, 1],
-                #     positions_world[:, 2],
-                #     label=label_text,
-                #     color="orange"
-                # )
-
                 if est_stride > 0:
                     for i in range(0, len(est_poses), est_stride):
                         draw_axes(ax, est_poses[i], length=0.4)
 
         except Exception as e:
-            print(
-                f"Estimate plotting failed for "
-                f"run_config='{run_config}': {e}"
-            )
+            print(f"Estimate plotting failed: {e}")
 
     # ------------------------------
     # Anchors
@@ -262,7 +260,6 @@ def plot_trial(
         plt.show()
 
     return ax
-
 
 def main():
     parser = argparse.ArgumentParser()
