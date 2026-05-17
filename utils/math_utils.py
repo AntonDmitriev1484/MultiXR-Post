@@ -149,6 +149,78 @@ def dump_stats(traj_ref_sync, traj_est_sync):
     # print(f" Rotational APE {json.dumps(ape_stats, indent=1)}")
     print(f"    Rotation APE,\n\t{ape_stats["mean"]=},\n\t{ape_stats["rmse"]=}")
 
+def yaw_umeyama_align(traj_ref, traj_est, correct_scale=False):
+    """
+    Yaw-only Umeyama alignment for evo trajectories.
+
+    Returns a NEW aligned PoseTrajectory3D.
+    """
+
+    P = traj_est.positions_xyz.copy()   # estimated
+    Q = traj_ref.positions_xyz.copy()   # reference
+
+    # centroids
+    mu_P = P.mean(axis=0)
+    mu_Q = Q.mean(axis=0)
+
+    P_centered = P - mu_P
+    Q_centered = Q - mu_Q
+
+    # XY covariance only
+    H = P_centered[:, :2].T @ Q_centered[:, :2]
+
+    U, S, Vt = np.linalg.svd(H)
+
+    R2 = Vt.T @ U.T
+
+    # reflection fix
+    if np.linalg.det(R2) < 0:
+        Vt[-1, :] *= -1
+        R2 = Vt.T @ U.T
+
+    # optional scale
+    scale = 1.0
+    if correct_scale:
+        var_P = np.sum(P_centered[:, :2] ** 2)
+        scale = np.sum(S) / var_P
+
+    # build full 3D yaw rotation
+    R_align = np.eye(3)
+    R_align[:2, :2] = R2
+
+    # translation
+    t_align = mu_Q - scale * (R_align @ mu_P)
+
+    # apply to positions
+    aligned_positions = (
+        scale * (R_align @ P.T)
+    ).T + t_align
+
+    # orientations
+    est_rots = R.from_quat(
+        traj_est.orientations_quat_wxyz[:, [1,2,3,0]]
+    )
+
+    yaw_rot = R.from_matrix(R_align)
+
+    aligned_rots = yaw_rot * est_rots
+
+    quat_xyzw = aligned_rots.as_quat()
+
+    # convert xyzw -> wxyz
+    aligned_quats_wxyz = np.column_stack([
+        quat_xyzw[:, 3],
+        quat_xyzw[:, 0],
+        quat_xyzw[:, 1],
+        quat_xyzw[:, 2]
+    ])
+
+    return PoseTrajectory3D(
+        positions_xyz=aligned_positions,
+        orientations_quat_wxyz=aligned_quats_wxyz,
+        timestamps=traj_est.timestamps.copy()
+    )
+
 # These get passed in as lists of 1 x 17 numpy arrays
 def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
 
@@ -194,7 +266,8 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
     traj_ref, traj_est = sync.associate_trajectories(opti_traj, slam_traj, max_diff = 0.01)
 
     # Align (SE3)
-    traj_est.align(traj_ref, correct_scale=True)
+    # traj_est.align(traj_ref, correct_scale=True)
+    traj_est = yaw_umeyama_align(traj_ref, traj_est, correct_scale=True)
 
     print(f"Umeyama Alignment Results:")
     dump_stats(traj_ref, traj_est)
