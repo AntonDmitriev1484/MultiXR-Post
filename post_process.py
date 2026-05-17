@@ -185,41 +185,6 @@ def post_process(args):
                 }
             } for body_pose, body_v in zip( list(opti_body_poses), list(opti_body_velocities))]
     
-
-    # imu_ts = [x["t"] for x in imu_json]
-    # opti_ts = [x[0] for x in body_opti_HTMs]
-
-    # plt.figure(figsize=(10, 2))
-
-    # # Plot IMU timestamps at y=1
-    # plt.scatter(
-    #     imu_ts,
-    #     np.ones_like(imu_ts),
-    #     s=5,
-    #     alpha=0.6,
-    #     c="blue",
-    #     label="IMU timestamps"
-    # )
-
-    # # Plot Optitrack timestamps at y=0
-    # plt.scatter(
-    #     opti_ts,
-    #     np.zeros_like(opti_ts),
-    #     s=5,
-    #     alpha=0.6,
-    #     c="green",
-    #     label="Optitrack timestamps"
-    # )
-
-    # plt.yticks([0, 1], ["Optitrack", "IMU"])
-
-    # plt.xlabel("Timestamp (s)")
-    # plt.title("IMU vs Optitrack timestamps")
-
-    # plt.grid(True, axis="x")
-
-    # plt.legend()
-
     
     aligned_slam_json = []
     if args.align:
@@ -265,12 +230,20 @@ def post_process(args):
                     j["status"] = "lost"
                 else:
                     j["status"] = "tracking"
-
             if len(intervals) == 0: 
                 for j in slam_json: j["status"] = "tracking"
 
+        for j in aligned_slam_json:
+            for interval in intervals:
+                if (START + interval["start"]) < j["t"] < (START+interval["end"]):
+                    j["status"] = "lost"
+                else:
+                    j["status"] = "tracking"
+            if len(intervals) == 0: 
+                for j in aligned_slam_json: j["status"] = "tracking"
     else:
         for j in slam_json: j["status"] = "tracking"
+        for j in aligned_slam_json: j["status"] = "tracking"
 
 
     synth_uwb_json = []
@@ -362,8 +335,22 @@ if __name__ == "__main__":
             # Record transforms
             json.dump(vars(T), open(f'{outpath}/transforms{user}.json', 'w'), cls=NumpyEncoder, indent=1)
             
+        # Mirror UWB ranges. This is something the Beluga firmware could report, but doesn't.
+        # It only logs range on the report, not on the final, this means the responder compute the range, but never logs it.
+        # This will effectively double our ranges.
+        mirrored_uwb = []
+        for j in merged_all:
+            if j["type"] == "uwb":
+                j_ = copy.deepcopy(j)
+                temp_src = j["src"]
+                j_["src"] = j["id"]
+                j_["id"] = temp_src
+                mirrored_uwb.append(j_)
+        merged_all += mirrored_uwb
 
-        # super_all = filtt(super_all) # TODO: Filter all data to fit within the smallest start timestamp.
+        # Synthetsize ranges in place of real ones.
+        # merged_all = range_synthesizer3(merged_all, anchor_positions, gt_trajectories, T, 0.2)
+
         merged_all = sorted(merged_all, key=lambda x: x["t"])
         json.dump(merged_all, open(outpath+"/all.json", 'w'), cls=NumpyEncoder, indent=1)
 
