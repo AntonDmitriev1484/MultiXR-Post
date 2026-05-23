@@ -84,92 +84,13 @@ import json
 #     return synth_ranges
 
 
-# # TODO: For each real range, that occurs and we could "overhear" (we dont keep track of this) add in a synthetic range
-# #some math first?
-# def range_synthesizer(START, END, body_traj, T, outpath, f_uwb=5/4.0, std=0.2):
-#     anchors = {
-#             1: [2, 0.5, 3],
-#             3: [-6, 2, 2],
-#             4: [-3, -3, 1],
-#             5: [0, -4, 2]
-#     }
-#     # anchors = {
-#     #         1: [2, 0.5, 3],
-#     #         3: [-6, 2, 2],
-#     #         4: [-3, -3, 1],
-#     #         5: [0, -4, 2],
-#     #         6: [-2, 2, 1.5]
-#     # }
-
-#     write_anchors = []
-#     synth_ranges = []
-
-#     # First transform body_traj to uwb_rx_traj
-
-#     dt_uwb = 1/f_uwb
-#     timestamps = np.arange(START, END, dt_uwb)
-
-#     body_traj = np.array(body_traj)
-
-#     for anchor_id, position in anchors.items():
-#         N_ranges = timestamps.shape[0]
-        
-#         write_anchors.append({"ID":anchor_id, "position":position})
-
-#         for i in range(0, timestamps.shape[0]):
-#             t = timestamps[i]
-            
-#             vicon_timestamps = body_traj[:,0]
-#             tdiffs = np.abs(vicon_timestamps - t)
-#             idx = np.argmin(tdiffs) # Get closest vicon pose to this timestamp
-
-#             T_world_to_body_tum = body_traj[idx]
-#             T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
-            
-#             T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
-#             T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
-
-#             ## NOTE: Something is getting inverted here, either in pose reporting or in range calculation
-
-#             dest_position = position
-#             source_position = T_decawave_to_world[:3,3] # Physical antenna position in world frame
-#             # source_position = np.linalg.inv(T_world_to_body)[:3,3]# body position in world frame (if just using RangeFactor)
-
-#             dist = np.linalg.norm(dest_position -  source_position)
-#             synth_range =  np.random.normal(loc=dist, scale=std)
-
-#             j = {
-#                 "t":t,
-#                 "type": "synth_uwb",
-#                 "tag": "synth_for_user",
-#                 "src": 2,
-#                 "id": anchor_id,
-#                 "pose": T_world_to_decawave, 
-#                 "range": synth_range
-#             }
-#             synth_ranges.append(j)
-        
-#     out_anchors = open(f'{outpath}/anchors.json', 'w')
-#     class NumpyEncoder(json.JSONEncoder):
-#         def default(self, obj):
-#             if isinstance(obj, np.ndarray):
-#                 return obj.tolist()
-#             if hasattr(obj, '__dict__'):
-#                 return vars(obj)
-#             return super().default(obj)
-        
-#     print(write_anchors)
-#     json.dump(write_anchors, out_anchors, cls=NumpyEncoder, indent=1)
-
-#     return synth_ranges
-
 
 # Returns evenly spaced ranges
-def range_synthesizer2(START, END, body_traj, T, outpath, f_uwb=5, std=0.2):
+def range_synthesizer2(START, END, body_traj, T, outpath, f_uwb=5/4.0, std=0.01):
     anchors = {
             1: [2, 0.5, 3],
             3: [-6, 2, 2],
-            4: [-3, -3, 1],
+            2: [-3, -3, 1],
             5: [0, -4, 2]
     }
     # anchors = {
@@ -255,98 +176,118 @@ def error_analysis( id, multi_all, anchors, gt_trajectories, T):
 
     range_errors = {}
     nlos_metric = {}
+    timestamps = {}
 
-    for j in multi_all:
-        if j["src"] == id and j["type"] == "uwb":
+    all_range_errors = []
+    all_range_ts = []
 
-            if j["id"] in mobile_nodes:
+    uwb = [j for j in multi_all if (j["src"] == id and j["type"] == "uwb")]
 
-                other_body_traj = np.array(gt_trajectories[j["id"]-2])
-                body_traj = np.array(gt_trajectories[j["src"]-2])
+    for j in uwb:
+        if j["id"] in mobile_nodes:
 
-                idx = np.argmin(np.abs(body_traj[:, 0] - j["t"]))
-                T_world_to_body_tum = body_traj[idx]
-                T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
-                T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
-                T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
-                tx_position = T_decawave_to_world[:3,3]
+            other_body_traj = np.array(gt_trajectories[j["id"]-2])
+            body_traj = np.array(gt_trajectories[j["src"]-2])
 
-                idx = np.argmin(np.abs(other_body_traj[:, 0] - j["t"]))
-                T_world_to_body_tum = other_body_traj[idx]
-                T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
-                T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
-                T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
-                other_tx_position = T_decawave_to_world[:3,3]
+            idx = np.argmin(np.abs(body_traj[:, 0] - j["t"]))
+            T_world_to_body_tum = body_traj[idx]
+            T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+            T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+            T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
+            tx_position = T_decawave_to_world[:3,3]
 
-                synth_range = np.linalg.norm(tx_position -  other_tx_position)
-                mes_range = j["range"]
+            idx = np.argmin(np.abs(other_body_traj[:, 0] - j["t"]))
+            T_world_to_body_tum = other_body_traj[idx]
+            T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+            T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+            T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
+            other_tx_position = T_decawave_to_world[:3,3]
 
-                range_errors.setdefault(j["id"], []).append(np.abs(synth_range - mes_range))
+            # Metrics recorded here
+            synth_range = np.linalg.norm(tx_position -  other_tx_position)
+            mes_range = j["range"]
 
-                A = 121.74
+            err = np.abs(synth_range - mes_range)
+            range_errors.setdefault(j["id"], []).append(err)
+            all_range_errors.append(err)
+            all_range_ts.append(j["t"])
 
-                fp_power_ = 10 * np.log10( ((j["firstpathamp1"] ** 2) + (j["firstpathamp2"]**2) + (j["firstpathamp3"]**2)) 
-                                        / (j["rxpreamcount"]**2) ) - A
-                rx_power_ = 10 * np.log10( j["maxgrowthcir"] * (2**17) / (j["rxpreamcount"] ** 2)) - A
-                
-                nlos_metric.setdefault(j["id"], []).append(rx_power_ - fp_power_)
+            timestamps.setdefault(j["id"], []).append(j["t"])
 
-            else:
+            A = 121.74
 
-                dest_position = [x['position'] for x in anchors if x['ID']== j['id']][0]
+            fp_power_ = 10 * np.log10( ((j["firstpathamp1"] ** 2) + (j["firstpathamp2"]**2) + (j["firstpathamp3"]**2)) 
+                                    / (j["rxpreamcount"]**2) ) - A
+            rx_power_ = 10 * np.log10( j["maxgrowthcir"] * (2**17) / (j["rxpreamcount"] ** 2)) - A
+            
+            nlos_metric.setdefault(j["id"], []).append(rx_power_ - fp_power_)
 
-                body_traj = np.array(gt_trajectories[j["src"]-2])
+        else:
 
-                idx = np.argmin(np.abs(body_traj[:, 0] - j["t"]))
+            dest_position = [x['position'] for x in anchors if x['ID']== j['id']][0]
 
-                T_world_to_body_tum = body_traj[idx]
-                T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
-                
-                T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
-                T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
+            body_traj = np.array(gt_trajectories[j["src"]-2])
 
-                source_position = T_decawave_to_world[:3,3] # Physical antenna position in world frame
-                # source_position = np.linalg.inv(T_world_to_body)[:3,3]# body position in world frame (if just using RangeFactor)
+            idx = np.argmin(np.abs(body_traj[:, 0] - j["t"]))
 
-                synth_range = np.linalg.norm(dest_position -  source_position)
-                mes_range = j["range"]
+            T_world_to_body_tum = body_traj[idx]
+            T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+            
+            T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+            T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
 
-                range_errors.setdefault(j["id"], []).append(np.abs(synth_range - mes_range))
+            source_position = T_decawave_to_world[:3,3] # Physical antenna position in world frame
+
+            # Metrics recorded here
+            synth_range = np.linalg.norm(dest_position -  source_position)
+            mes_range = j["range"]
+            timestamps.setdefault(j["id"], []).append(j["t"])
+
+            err = np.abs(synth_range - mes_range)
+            range_errors.setdefault(j["id"], []).append(err)
+            all_range_errors.append(err)
+            all_range_ts.append(j["t"])
+
+            A = 121.74
+
+            fp_power_ = 10 * np.log10( ((j["firstpathamp1"] ** 2) + (j["firstpathamp2"]**2) + (j["firstpathamp3"]**2)) 
+                                    / (j["rxpreamcount"]**2) ) - A
+            rx_power_ = 10 * np.log10( j["maxgrowthcir"] * (2**17) / (j["rxpreamcount"] ** 2)) - A
+
+            nlos_metric.setdefault(j["id"], []).append(rx_power_ - fp_power_)
 
 
-                A = 121.74
-
-                fp_power_ = 10 * np.log10( ((j["firstpathamp1"] ** 2) + (j["firstpathamp2"]**2) + (j["firstpathamp3"]**2)) 
-                                        / (j["rxpreamcount"]**2) ) - A
-                rx_power_ = 10 * np.log10( j["maxgrowthcir"] * (2**17) / (j["rxpreamcount"] ** 2)) - A
-
-                nlos_metric.setdefault(j["id"], []).append(rx_power_ - fp_power_)
-
-
+    print()
     for node, err in range_errors.items():
 
         if node == id:
             continue
 
+        nlos_score = nlos_metric[node]
+        t = timestamps[node]
+        # print(timestamps)
+
         fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
 
-        axs[0].plot(err)
+        # print(err)
+        axs[0].plot(t, err)
         axs[0].set_title(f"Range Errors from {id} to {node}")
-        axs[0].set_ylabel("Error (m)")
+        axs[0].set_xlabel("Time (s)")
+        axs[0].set_ylabel("Range (m)")
         axs[0].grid(True)
 
-        nlos_score = nlos_metric[node]
 
-        axs[1].plot(nlos_score if np.ndim(nlos_score) > 0 else [nlos_score]*len(err))
+        axs[1].plot(t, nlos_score)
 
         axs[1].set_title("NLOS Metric")
-        axs[1].set_xlabel("Range #")
+        axs[1].set_xlabel("Time (s)")
         axs[1].set_ylabel("NLOS score")
         axs[1].grid(True)
 
         plt.tight_layout()
 
     plt.show()
+
 
 
 # # Input trajectories are T_world_to_body we need T_body_world
@@ -407,113 +348,3 @@ def range_synthesizer3( multi_all, anchors, gt_trajectories, T, std):
 
     return multi_all
 
-
-# import numpy as np
-# import matplotlib.pyplot as plt
-# # Input trajectories are T_world_to_body we need T_body_world
-# def range_synthesizer3(multi_all, anchors, gt_trajectories, T, std):
-
-#     import matplotlib.pyplot as plt
-
-#     # Replace all real ranges with synthetic.
-
-#     mobile_nodes = [2,3,4]
-
-#     # Visualization
-#     fig = plt.figure()
-#     ax = fig.add_subplot(111, projection='3d')
-
-#     plot_counter = 0
-
-#     for id in mobile_nodes:  # For each user
-#         for j in multi_all:
-
-#             if j["src"] == id and j["type"] == "uwb":
-
-#                 plot_this = (plot_counter % 4 == 0)
-#                 plot_counter += 1
-
-#                 if j["id"] in mobile_nodes:  # If ranging to another user
-
-#                     other_body_traj = np.array(gt_trajectories[j["id"] - 2])
-#                     body_traj = np.array(gt_trajectories[j["src"] - 2])
-
-#                     idx = np.argmin(np.abs(body_traj[:, 0] - j["t"]))
-#                     T_world_to_body_tum = body_traj[idx]
-#                     T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
-
-#                     T_decawave_to_world = (
-#                         np.linalg.inv(T_world_to_body)
-#                         @ np.linalg.inv(T.T_body_to_decawave)
-#                     )
-
-#                     tx_position = T_decawave_to_world[:3, 3]
-
-#                     idx = np.argmin(np.abs(other_body_traj[:, 0] - j["t"]))
-#                     T_world_to_body_tum = other_body_traj[idx]
-#                     T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
-
-#                     T_decawave_to_world = (
-#                         np.linalg.inv(T_world_to_body)
-#                         @ np.linalg.inv(T.T_body_to_decawave)
-#                     )
-
-#                     other_tx_position = T_decawave_to_world[:3, 3]
-
-#                     synth_range = np.random.normal(
-#                         loc=np.linalg.norm(tx_position - other_tx_position),
-#                         scale=std
-#                     )
-
-#                     j["range"] = synth_range
-
-#                     if plot_this:
-#                         xs = [tx_position[0], other_tx_position[0]]
-#                         ys = [tx_position[1], other_tx_position[1]]
-#                         zs = [tx_position[2], other_tx_position[2]]
-
-#                         ax.scatter(xs, ys, zs, s=5)
-#                         ax.plot(xs, ys, zs, linewidth=0.5)
-
-#                 else:  # If ranging to an anchor
-
-#                     dest_position = np.array(
-#                         [x['position'] for x in anchors if x['ID'] == j['id']][0]
-#                     )
-
-#                     t = j["t"]
-#                     body_traj = np.array(gt_trajectories[j["src"] - 2])
-
-#                     idx = np.argmin(np.abs(body_traj[:, 0] - t))
-
-#                     T_world_to_body_tum = body_traj[idx]
-#                     T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
-
-#                     T_decawave_to_world = (
-#                         np.linalg.inv(T_world_to_body)
-#                         @ np.linalg.inv(T.T_body_to_decawave)
-#                     )
-
-#                     source_position = T_decawave_to_world[:3, 3]
-
-#                     synth_range = np.random.normal(
-#                         loc=np.linalg.norm(source_position - dest_position),
-#                         scale=std
-#                     )
-
-#                     j["range"] = synth_range
-
-#                     if plot_this:
-#                         xs = [source_position[0], dest_position[0]]
-#                         ys = [source_position[1], dest_position[1]]
-#                         zs = [source_position[2], dest_position[2]]
-
-#                         ax.scatter(xs, ys, zs, s=5)
-#                         ax.plot(xs, ys, zs, linewidth=0.5)
-
-#     ax.set_xlabel("X")
-#     ax.set_ylabel("Y")
-#     ax.set_zlabel("Z")
-#     plt.show()
-
-#     return multi_all

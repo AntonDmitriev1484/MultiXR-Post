@@ -83,7 +83,7 @@ def clean_opti(opti_data):
 
     def is_outlier(tum_pose):
         norm = np.linalg.norm(np.array(tum_pose)[1:])
-        return norm <= 1e-5
+        return norm <= 1e-5 or (tum_pose[3] < 1) # or z is less than 0.5m
 
     # If our starting pose is an outlier and we have nothing to interpolate between
     start_pose = None
@@ -91,7 +91,6 @@ def clean_opti(opti_data):
         if not is_outlier(data[i]): 
             start_pose = np.array(data[i]) # Next valid TUM timestamped pose
             break
-
     for p in range(0,i):
         data[p] = start_pose
 

@@ -70,6 +70,7 @@ def post_process(args):
     print(f"Data duration {START} - {END}")
 
 
+    # if args.opti:
     in_opti_bagpath = Path(f"/home/antond2/ros_ws/ros2/{args.trial_name}")
     opti_helmet_traj, opti_anchor_trajectories = load_optitrack(in_opti_bagpath, ID)
     opti_data = crop_opti(opti_helmet_traj, START, END)
@@ -87,7 +88,8 @@ def post_process(args):
     T = define_transforms(in_kalibr) #TODO: Need to revise this method for how optitrack reports
 
     # Position of each UWB anchor transmitter in the optitrack world frame
-    anchor_positions = compute_anchors(opti_anchor_trajectories, T.T_optiuwb_to_uwbtx)
+    if args.opti:
+        anchor_positions = compute_anchors(opti_anchor_trajectories, T.T_optiuwb_to_uwbtx)
 
     ### Process SLAM data
     slam_json = []
@@ -133,11 +135,7 @@ def post_process(args):
                 "t": float(body_pose[0]),
                 "type": "slam_pose",
                 "T_body_world" : body_pose[1:].reshape((4,4)),
-                "v_world": {
-                        "vx": float(body_v[1]),
-                        "vy": float(body_v[2]),
-                        "vz": float(body_v[3])
-                }
+
             } for body_pose, body_v in zip( list(slam_body_poses), list(slam_body_velocities))]
 
     ### Process optitrack data
@@ -178,11 +176,6 @@ def post_process(args):
                 "t": float(body_pose[0]),
                 "type": "opti_pose",
                 "T_body_world" : body_pose[1:].reshape((4,4)),
-                "v_world": {
-                        "vx": float(body_v[1]),
-                        "vy": float(body_v[2]),
-                        "vz": float(body_v[3])
-                }
             } for body_pose, body_v in zip( list(opti_body_poses), list(opti_body_velocities))]
     
     
@@ -224,6 +217,10 @@ def post_process(args):
         # Later GTSAM can use this tag to not use these poses in fusion.
         # Note: Failures are specified in s, relative to the start of the rosbag.
         intervals = json.load(open(f'./{ID}/synth_failures/{args.trial_name}.json','r'))
+        # failure_json = json.load(open(f'/home/antond2/Desktop/Research/MultiXR-Post/synth_failures/{args.trial_name}.json','r'))
+        # print(failure_json)
+        # intervals = failure_json.get(str(ID), [])
+
         for j in slam_json:
             for interval in intervals:
                 if (START + interval["start"]) < j["t"] < (START+interval["end"]):
@@ -247,7 +244,7 @@ def post_process(args):
 
 
     synth_uwb_json = []
-    # synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, outpath)\\
+    # synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, outpath)
     
     # Compose the final factor graph dataset
     all_data = uwb_json + imu_json + opti_json + slam_json + synth_uwb_json + aligned_slam_json
@@ -255,8 +252,9 @@ def post_process(args):
 
     ### Copy all world information: T, anchors, apriltags, to output
 
-    out_anchors = open(f'{outpath}/anchors.json', 'w')
-    json.dump(anchor_positions, out_anchors, cls=NumpyEncoder, indent=1)
+    if args.opti:
+        out_anchors = open(f'{outpath}/anchors.json', 'w')
+        json.dump(anchor_positions, out_anchors, cls=NumpyEncoder, indent=1)
 
 
     with open(f'{outpath}/transforms.json', 'w') as fs: json.dump(vars(T), fs, cls=NumpyEncoder, indent=1)
@@ -266,11 +264,11 @@ def post_process(args):
     print("Checking frequency of input data")
     print(f" Measured Synth UWB frequency {len(synth_uwb_json) / (END-START)}")
     print(f" Measured UWB frequency {len(uwb_json) / (END-START)}")
-    print(f" Measured optitrack frequency {len(opti_data) / (END-START)}")
+    if args.opti: print(f" Measured optitrack frequency {len(opti_data) / (END-START)}")
     print(f" Measured SLAM frequency {len(slam_data) / (END-START)}")
 
     print("Checking frequency of subsampled output")
-    print(f" Measured subsampled optitrack frequency {len(opti_json) / (END-START)}")
+    if args.opti: print(f" Measured subsampled optitrack frequency {len(opti_json) / (END-START)}")
     print(f" Measured subsampled SLAM frequency {len(slam_json) / (END-START)}")
 
 
@@ -286,7 +284,11 @@ def post_process(args):
     np.savetxt(f"{outpath}/opti_inv.txt", np.array(body_opti_inv_tum_traj), fmt="%.8f")
     np.savetxt(f"{outpath}/slam_inv.txt", np.array(body_slam_inv_tum_traj), fmt="%.8f")
 
-    return all_data, anchor_positions, T, body_opti_tum_traj
+    if not args.opti: 
+        return all_data, {}, T, body_opti_tum_traj
+    else:
+        return all_data, anchor_positions, T, body_opti_tum_traj
+    
 
 if __name__ == "__main__":
     # Example usage:
@@ -338,15 +340,17 @@ if __name__ == "__main__":
         # Mirror UWB ranges. This is something the Beluga firmware could report, but doesn't.
         # It only logs range on the report, not on the final, this means the responder compute the range, but never logs it.
         # This will effectively double our ranges.
-        mirrored_uwb = []
-        for j in merged_all:
-            if j["type"] == "uwb":
-                j_ = copy.deepcopy(j)
-                temp_src = j["src"]
-                j_["src"] = j["id"]
-                j_["id"] = temp_src
-                mirrored_uwb.append(j_)
-        merged_all += mirrored_uwb
+        # mirrored_uwb = []
+        # for j in merged_all:
+        #     if j["type"] == "uwb":
+        #         j_ = copy.deepcopy(j)
+        #         temp_src = j["src"]
+        #         j_["src"] = j["id"]
+        #         j_["id"] = temp_src
+        #         mirrored_uwb.append(j_)
+        # merged_all += mirrored_uwb
+
+        ### !!!!! TODO !!!! MIRRORING IS OFFF !!!!!
 
         # Synthetsize ranges in place of real ones.
         # merged_all = range_synthesizer3(merged_all, anchor_positions, gt_trajectories, T, 0.2)
@@ -356,7 +360,8 @@ if __name__ == "__main__":
 
         # UWB error analysis
         if args.check_uwb_error:
-            error_analysis(4, merged_all, anchor_positions, gt_trajectories, T)
+            error_analysis(2, merged_all, anchor_positions, gt_trajectories, T)
+
 
     else:
         post_process(args)

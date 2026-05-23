@@ -252,7 +252,7 @@ def plot_trial(
     ax.set_ylim(-2, 2)
     ax.set_zlim(-2, 2)
 
-    ax.set_title(trial_name)
+    ax.set_title(f"NUC{id} {trial_name}")
     ax.view_init(elev=45, azim=45)
     ax.legend()
 
