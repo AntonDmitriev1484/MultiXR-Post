@@ -2,6 +2,7 @@ import numpy as np
 from utils.math_utils import *
 import matplotlib.pyplot as plt
 import json
+import copy
 
 # Body (IMU) trajectory in world frame
 # Default UWB frequency is 5
@@ -289,6 +290,72 @@ def error_analysis( id, multi_all, anchors, gt_trajectories, T):
     plt.show()
 
 
+# Compute range error for inter-user and user-anchor ranges.
+def generate_parham_data( id, multi_all, anchors, gt_trajectories, T, trial_name):
+
+    
+    mobile_nodes = [2,3,4]
+    # First transform body_traj to uwb_rx_traj
+
+    range_errors = {}
+    nlos_metric = {}
+    timestamps = {}
+
+    all_range_errors = []
+    all_range_ts = []
+
+
+    uwb = [j for j in multi_all if (j["src"] == id and j["type"] == "uwb")]
+    annotated_uwb = []
+
+    for j in uwb:
+        if j["id"] in mobile_nodes:
+
+            other_body_traj = np.array(gt_trajectories[j["id"]-2])
+            body_traj = np.array(gt_trajectories[j["src"]-2])
+
+            idx = np.argmin(np.abs(body_traj[:, 0] - j["t"]))
+            T_world_to_body_tum = body_traj[idx]
+            T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+            T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+            T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
+            tx_position = T_decawave_to_world[:3,3]
+
+            idx = np.argmin(np.abs(other_body_traj[:, 0] - j["t"]))
+            T_world_to_body_tum = other_body_traj[idx]
+            T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+            T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+            T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
+            other_tx_position = T_decawave_to_world[:3,3]
+
+            annotated_range = copy.deepcopy(j)
+            annotated_range["optitrack_src_tx_position"] = tx_position
+            annotated_range["optitrack_dst_tx_position"] = other_tx_position
+            annotated_uwb.append(annotated_range)
+
+        else:
+
+            dest_position = [x['position'] for x in anchors if x['ID']== j['id']][0]
+
+            body_traj = np.array(gt_trajectories[j["src"]-2])
+
+            idx = np.argmin(np.abs(body_traj[:, 0] - j["t"]))
+
+            T_world_to_body_tum = body_traj[idx]
+            T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+            
+            T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+            T_world_to_decawave = np.linalg.inv(T_decawave_to_world)
+
+            source_position = T_decawave_to_world[:3,3] # Physical antenna position in world frame
+
+            # Metrics recorded here
+            annotated_range = copy.deepcopy(j)
+            annotated_range["optitrack_src_tx_position"] = source_position
+            annotated_range["optitrack_dst_tx_position"] = dest_position
+            annotated_uwb.append(annotated_range)
+
+    return annotated_uwb
 
 # # Input trajectories are T_world_to_body we need T_body_world
 def range_synthesizer3( multi_all, anchors, gt_trajectories, T, std):

@@ -144,7 +144,6 @@ if __name__ == "__main__":
 
     NO_SUBSAMPLE = -10
     parser = argparse.ArgumentParser(description="Stream collector")
-    parser.add_argument("id", type=int)
     parser.add_argument("trial_name" , type=str)
 
     args = parser.parse_args()
@@ -176,5 +175,8 @@ if __name__ == "__main__":
 
     merged_all = sorted(merged_all, key=lambda x: x["t"])
 
-    error_analysis(4, merged_all, anchor_positions, gt_trajectories, T)
+    # error_analysis(4, merged_all, anchor_positions, gt_trajectories, T)
 
+    for id in [2,3,4]:
+        annotated_uwb = generate_parham_data(id, merged_all, anchor_positions, gt_trajectories, T, args.trial_name)
+        json.dump(annotated_uwb, open(f'./filter_dev_data/{id}/{args.trial_name}.json', 'w'), cls=NumpyEncoder, indent=1)
