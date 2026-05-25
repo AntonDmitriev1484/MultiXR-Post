@@ -12,6 +12,7 @@ from evo.core import sync
 from evo.core import metrics
 from evo.core.trajectory import PoseTrajectory3D
 from evo.tools import plot
+from evo.core.geometry import umeyama_alignment
 import matplotlib.pyplot as plt
 
 # Note; By default SLAM tracked body frame is the left camera
@@ -222,7 +223,7 @@ def yaw_umeyama_align(traj_ref, traj_est, correct_scale=False):
     )
 
 # These get passed in as lists of 1 x 17 numpy arrays
-def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
+def umeyama_alignment1(body_opti_HTMs, body_slam_HTMs):
 
     # Per examples here: https://github.com/MichaelGrupp/evo/blob/master/examples/alignment_demo.py
 
@@ -300,3 +301,239 @@ def umeyama_alignment(body_opti_HTMs, body_slam_HTMs):
         ])
 
     return traj_est_out
+
+
+import copy
+# These get passed in as lists of 1 x 17 numpy arrays
+def bonus_umeyama_alignment(
+    body_opti_HTMs,
+    body_slam_HTMs,
+    body_live_slam_HTMs,
+    fail_end_ts
+):
+
+    # ------------------------------------------------------------
+    # Convert input arrays
+    # ------------------------------------------------------------
+
+    body_opti_HTMs = np.array(body_opti_HTMs)
+    body_slam_HTMs = np.array(body_slam_HTMs)
+    body_live_slam_HTMs = np.array(body_live_slam_HTMs)
+
+    opti_ts = body_opti_HTMs[:, 0]
+    slam_ts = body_slam_HTMs[:, 0]
+    live_slam_ts = body_live_slam_HTMs[:, 0]
+
+    opti_poses = np.linalg.inv(
+        body_opti_HTMs[:, 1:17].reshape((-1, 4, 4))
+    )
+
+    slam_poses = np.linalg.inv(
+        body_slam_HTMs[:, 1:17].reshape((-1, 4, 4))
+    )
+
+    live_slam_poses = np.linalg.inv(
+        body_live_slam_HTMs[:, 1:17].reshape((-1, 4, 4))
+    )
+
+    # ------------------------------------------------------------
+    # Convert to EVO trajectories
+    # ------------------------------------------------------------
+
+    def poses_to_traj(poses, timestamps):
+
+        positions = poses[:, :3, 3]
+
+        rot_mats = poses[:, :3, :3]
+        quats_xyzw = R.from_matrix(rot_mats).as_quat()
+
+        quats_wxyz = np.column_stack([
+            quats_xyzw[:, 3],
+            quats_xyzw[:, 0],
+            quats_xyzw[:, 1],
+            quats_xyzw[:, 2]
+        ])
+
+        return PoseTrajectory3D(
+            positions_xyz=positions,
+            orientations_quat_wxyz=quats_wxyz,
+            timestamps=timestamps
+        )
+
+    opti_traj = poses_to_traj(opti_poses, opti_ts)
+    slam_traj = poses_to_traj(slam_poses, slam_ts)
+    live_slam_traj = poses_to_traj(live_slam_poses, live_slam_ts)
+
+# ------------------------------------------------------------
+    # Crop trajectories AFTER fail_end_ts for alignment computation
+    # ------------------------------------------------------------
+
+    print(fail_end_ts)
+    opti_mask = opti_traj.timestamps >= fail_end_ts
+    slam_mask = slam_traj.timestamps >= fail_end_ts
+
+    opti_traj_crop = PoseTrajectory3D(
+        positions_xyz=opti_traj.positions_xyz[opti_mask],
+        orientations_quat_wxyz=opti_traj.orientations_quat_wxyz[opti_mask],
+        timestamps=opti_traj.timestamps[opti_mask]
+    )
+
+    slam_traj_crop = PoseTrajectory3D(
+        positions_xyz=slam_traj.positions_xyz[slam_mask],
+        orientations_quat_wxyz=slam_traj.orientations_quat_wxyz[slam_mask],
+        timestamps=slam_traj.timestamps[slam_mask]
+    )
+
+    # ------------------------------------------------------------
+    # Synchronize cropped trajectories
+    # ------------------------------------------------------------
+
+    traj_ref, traj_est = sync.associate_trajectories(
+        opti_traj_crop,
+        slam_traj_crop,
+        max_diff=0.01
+    )
+    # ------------------------------------------------------------
+    # Compute alignment ONCE
+    # ------------------------------------------------------------
+
+    aligned_sync = yaw_umeyama_align(
+        traj_ref,
+        copy.deepcopy(traj_est),
+        correct_scale=True
+    )
+
+    print("Umeyama Alignment Results:")
+    dump_stats(traj_ref, aligned_sync)
+
+    # ------------------------------------------------------------
+    # Recover alignment transform
+    # ------------------------------------------------------------
+
+    # Compute transform from original -> aligned
+    p_before = traj_est.positions_xyz
+    p_after = aligned_sync.positions_xyz
+
+    # Solve similarity transform explicitly
+    R_align, t_align, s = umeyama_alignment(
+        p_before.T,
+        p_after.T,
+        with_scale=True
+    )
+
+    # ------------------------------------------------------------
+    # Apply alignment to arbitrary trajectory
+    # ------------------------------------------------------------
+
+    def apply_alignment(traj):
+
+        traj = copy.deepcopy(traj)
+
+        # positions
+        aligned_positions = (
+            s * (R_align @ traj.positions_xyz.T)
+        ).T + t_align
+
+        # rotations
+        rot_align = R.from_matrix(R_align)
+
+        rots = R.from_quat(
+            traj.orientations_quat_wxyz[:, [1,2,3,0]]
+        )
+
+        aligned_rots = rot_align * rots
+
+        quats_xyzw = aligned_rots.as_quat()
+
+        quats_wxyz = np.column_stack([
+            quats_xyzw[:, 3],
+            quats_xyzw[:, 0],
+            quats_xyzw[:, 1],
+            quats_xyzw[:, 2]
+        ])
+
+        return PoseTrajectory3D(
+            positions_xyz=aligned_positions,
+            orientations_quat_wxyz=quats_wxyz,
+            timestamps=traj.timestamps
+        )
+
+    aligned_slam = apply_alignment(slam_traj)
+    aligned_live_slam = apply_alignment(live_slam_traj)
+
+    ### debug plotting
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    ax.plot(
+        opti_traj.positions_xyz[:, 0],
+        opti_traj.positions_xyz[:, 1],
+        opti_traj.positions_xyz[:, 2],
+        label="Opti"
+    )
+
+    ax.plot(
+        aligned_slam.positions_xyz[:, 0],
+        aligned_slam.positions_xyz[:, 1],
+        aligned_slam.positions_xyz[:, 2],
+        label="Aligned SLAM"
+    )
+
+    ax.plot(
+        aligned_live_slam.positions_xyz[:, 0],
+        aligned_live_slam.positions_xyz[:, 1],
+        aligned_live_slam.positions_xyz[:, 2],
+        label="Aligned Live SLAM"
+    )
+
+    ax.legend()
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+
+    plt.show()
+     ##
+
+    # ------------------------------------------------------------
+    # Convert back to TUM format
+    # ------------------------------------------------------------
+
+    def traj_to_tum(traj):
+
+        out = []
+
+        rots = R.from_quat(
+            traj.orientations_quat_wxyz[:, [1,2,3,0]]
+        )
+
+        for t, p, r in zip(
+            traj.timestamps,
+            traj.positions_xyz,
+            rots
+        ):
+
+            r_inv = r.inv()
+
+            p_inv = -r_inv.apply(p)
+
+            qx, qy, qz, qw = r_inv.as_quat()
+
+            out.append([
+                t,
+                p_inv[0],
+                p_inv[1],
+                p_inv[2],
+                qx,
+                qy,
+                qz,
+                qw
+            ])
+
+        return out
+
+
+
+    return (
+        traj_to_tum(aligned_slam),
+        traj_to_tum(aligned_live_slam)
+    )

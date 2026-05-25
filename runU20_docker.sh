@@ -22,3 +22,5 @@ sleep 1
 # Launch two terminal windows and run docker exec, cd to /data
 gnome-terminal -- bash -c "docker exec -it U20 bash -c 'cd /data && exec bash'"
 gnome-terminal -- bash -c "docker exec -it U20 bash -c 'cd /data && exec bash'"
+gnome-terminal -- bash -c "docker exec -it U20 bash -c 'cd /data && exec bash'"
+
