@@ -364,7 +364,10 @@ def bonus_umeyama_alignment(
     slam_traj = poses_to_traj(slam_poses, slam_ts)
     live_slam_traj = poses_to_traj(live_slam_poses, live_slam_ts)
 
-# ------------------------------------------------------------
+    #TODO: Undo later
+    # slam_traj = live_slam_traj
+
+    # ------------------------------------------------------------
     # Crop trajectories AFTER fail_end_ts for alignment computation
     # ------------------------------------------------------------
 
@@ -407,19 +410,41 @@ def bonus_umeyama_alignment(
     dump_stats(traj_ref, aligned_sync)
 
     # ------------------------------------------------------------
-    # Recover alignment transform
+    # Recover yaw-only alignment transform
     # ------------------------------------------------------------
 
-    # Compute transform from original -> aligned
     p_before = traj_est.positions_xyz
     p_after = aligned_sync.positions_xyz
 
-    # Solve similarity transform explicitly
-    R_align, t_align, s = umeyama_alignment(
-        p_before.T,
-        p_after.T,
-        with_scale=True
-    )
+    # centroids
+    mu_before = p_before.mean(axis=0)
+    mu_after = p_after.mean(axis=0)
+
+    # centered
+    P = p_before - mu_before
+    Q = p_after - mu_after
+
+    # yaw-only covariance
+    H = P[:, :2].T @ Q[:, :2]
+
+    U, Svals, Vt = np.linalg.svd(H)
+
+    R2 = Vt.T @ U.T
+
+    if np.linalg.det(R2) < 0:
+        Vt[-1, :] *= -1
+        R2 = Vt.T @ U.T
+
+    # scale
+    var_P = np.sum(P[:, :2] ** 2)
+    s = np.sum(Svals) / var_P
+
+    # full 3D yaw rotation
+    R_align = np.eye(3)
+    R_align[:2, :2] = R2
+
+    # translation
+    t_align = mu_after - s * (R_align @ mu_before)
 
     # ------------------------------------------------------------
     # Apply alignment to arbitrary trajectory

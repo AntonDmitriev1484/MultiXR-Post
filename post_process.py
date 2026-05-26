@@ -100,7 +100,8 @@ def post_process(args):
     T = define_transforms(in_kalibr)
 
     # Position of each UWB anchor transmitter in the optitrack world frame
-    if args.opti:
+    anchor_positions = {}
+    if args.opti is not None:
         anchor_positions = compute_anchors(opti_anchor_trajectories, T.T_optiuwb_to_uwbtx)
 
     ### Process SLAM data
@@ -189,6 +190,25 @@ def post_process(args):
             fail_end_ts = interval[0]["end"] + all_data_start_ts
             body_slam_aligned_tum_traj, body_live_slam_aligned_tum_traj = bonus_umeyama_alignment(body_opti_HTMs, body_slam_HTMs, body_live_slam_HTMs, fail_end_ts)
 
+            #TODO: Remove
+            # body_live_slam_aligned_tum_traj = body_slam_aligned_tum_traj
+        
+            def identity(T_body_to_world): # Already in body frame.
+                return T_body_to_world
+            aligned_live_slam_body_poses, aligned_live_slam_body_velocities = aggregate_tracker(identity, np.array(body_live_slam_aligned_tum_traj))
+            # Each pose is the IMU pose in the optitrack world frame.
+            aligned_slam_json = [ {
+                    "t": float(body_pose[0]),
+                    "type": "aligned_slam_pose",
+                    "T_body_world" : body_pose[1:].reshape((4,4)),
+                    "v_world": {
+                            "vx": float(body_v[1]),
+                            "vy": float(body_v[2]),
+                            "vz": float(body_v[3])
+                    }
+                } for body_pose, body_v in zip( list(aligned_live_slam_body_poses), list(aligned_live_slam_body_velocities))]
+            # Overwrite aligned slam json with the live - SLAM output
+
         else:
 
             # Align the body's SLAM 'save_traj' trajectory to the Optitrack trajectory
@@ -218,16 +238,16 @@ def post_process(args):
                     }
                 } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
 
-
-    if args.synth_failures:
+    if real_failures:
+        intervals = json.load(open(f'./real_fails/{args.trial_name}_nuc{args.id}_fail.json','r'))
+    elif args.synth_failures:
         # Go through the failure intervals, tag all poses in this interval as "lost"
         # Later GTSAM can use this tag to not use these poses in fusion.
         # Note: Failures are specified in s, relative to the start of the rosbag.
         intervals = json.load(open(f'./{ID}/synth_failures/{args.trial_name}.json','r'))
-        # failure_json = json.load(open(f'/home/antond2/Desktop/Research/MultiXR-Post/synth_failures/{args.trial_name}.json','r'))
-        # print(failure_json)
-        # intervals = failure_json.get(str(ID), [])
 
+    if real_failures or args.synth_failures:
+        START = metadata["start_ns"] * 1e-9
         for j in slam_json:
             for interval in intervals:
                 if (START + interval["start"]) < j["t"] < (START+interval["end"]):
@@ -292,7 +312,7 @@ def post_process(args):
     # np.savetxt(f"{outpath}/opti_inv.txt", np.array(body_opti_inv_tum_traj), fmt="%.8f")
     # np.savetxt(f"{outpath}/slam_inv.txt", np.array(body_slam_inv_tum_traj), fmt="%.8f")
 
-    if not args.opti: 
+    if args.opti is None: 
         return all_data, {}, T, body_opti_tum_traj
     else:
         return all_data, anchor_positions, T, body_opti_tum_traj
@@ -331,14 +351,13 @@ if __name__ == "__main__":
         merged_all = []
         gt_trajectories = []
         
-        for user in [2,3,4]: # Hard coded removing 3 for opti_multi1
+        for user in [2,3,4]:
             print(f"\nNUC{user}\n")
 
             args.id = user # Override whatever ID gets passed in
             all, anchor_positions, T, body_opti_tum_traj = post_process(args)
             merged_all = merged_all + all
             gt_trajectories.append(body_opti_tum_traj)
-
             # Record anchors
             if user==2: json.dump(anchor_positions, open(outpath+"/anchors.json", 'w'), cls=NumpyEncoder, indent=1)
 
@@ -348,15 +367,15 @@ if __name__ == "__main__":
         # Mirror UWB ranges. This is something the Beluga firmware could report, but doesn't.
         # It only logs range on the report, not on the final, this means the responder compute the range, but never logs it.
         # This will effectively double our ranges.
-        # mirrored_uwb = []
-        # for j in merged_all:
-        #     if j["type"] == "uwb":
-        #         j_ = copy.deepcopy(j)
-        #         temp_src = j["src"]
-        #         j_["src"] = j["id"]
-        #         j_["id"] = temp_src
-        #         mirrored_uwb.append(j_)
-        # merged_all += mirrored_uwb
+        mirrored_uwb = []
+        for j in merged_all:
+            if j["type"] == "uwb":
+                j_ = copy.deepcopy(j)
+                temp_src = j["src"]
+                j_["src"] = j["id"]
+                j_["id"] = temp_src
+                mirrored_uwb.append(j_)
+        merged_all += mirrored_uwb
 
         ### !!!!! TODO !!!! MIRRORING IS OFFF !!!!!
 
@@ -368,7 +387,7 @@ if __name__ == "__main__":
 
         # UWB error analysis
         if args.check_uwb_error:
-            error_analysis(2, merged_all, anchor_positions, gt_trajectories, T)
+            error_analysis(4, merged_all, anchor_positions, gt_trajectories, T)
 
 
     else:
