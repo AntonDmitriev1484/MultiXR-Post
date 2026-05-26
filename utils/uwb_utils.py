@@ -274,7 +274,7 @@ def error_analysis( id, multi_all, anchors, gt_trajectories, T):
         axs[0].plot(t, err)
         axs[0].set_title(f"Range Errors from {id} to {node}")
         axs[0].set_xlabel("Time (s)")
-        axs[0].set_ylabel("Range (m)")
+        axs[0].set_ylabel("Error (m)")
         axs[0].grid(True)
 
 

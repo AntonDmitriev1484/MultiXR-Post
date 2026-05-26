@@ -148,6 +148,78 @@ def compute_anchors(opti_anchor_trajectories, T_optiuwb_to_uwbtx):
         )
     return anchor_positions
 
+# def compute_anchors(opti_anchor_trajectories, T_optiuwb_to_uwbtx):
+
+#     anchor_positions = []
+
+#     # Debug plot
+#     fig = plt.figure()
+#     ax = fig.add_subplot(111, projection='3d')
+
+#     for id, poses in opti_anchor_trajectories.items():
+
+#         poses = [
+#             pose for pose in poses
+#             if np.linalg.norm(np.array(pose)[1:]) > 1e-5
+#         ]  # Filter outliers
+
+#         tx_positions = []
+
+#         # Transform from marker frame to center of uwb transmitter.
+#         # Each tx position is the UWB tag origin in the optitrack world frame
+#         for pose in poses:
+
+#             T_optiuwb_to_world = slam_quat_to_HTM(pose)
+
+#             T_world_to_tx = (
+#                 T_optiuwb_to_uwbtx
+#                 @ np.linalg.inv(T_optiuwb_to_world)
+#             )
+
+#             T_tx_to_world = np.linalg.inv(T_world_to_tx)
+
+#             tx_positions.append(T_tx_to_world[:3, 3])
+
+#         tx_positions = np.array(tx_positions)
+
+#         # Scatter trajectory
+#         ax.scatter(
+#             tx_positions[:, 0],
+#             tx_positions[:, 1],
+#             tx_positions[:, 2],
+#             s=5,
+#             label=f"Anchor {id}"
+#         )
+
+#         # Mean anchor position
+#         tx_position = np.mean(tx_positions, axis=0)
+
+#         # Plot mean position larger
+#         ax.scatter(
+#             tx_position[0],
+#             tx_position[1],
+#             tx_position[2],
+#             s=100,
+#             marker='x'
+#         )
+
+#         anchor_positions.append(
+#             {
+#                 "ID": int(id),
+#                 "position": list(tx_position)
+#             }
+#         )
+
+#     ax.set_title("Anchor Trajectories")
+#     ax.set_xlabel("X")
+#     ax.set_ylabel("Y")
+#     ax.set_zlabel("Z")
+#     ax.legend()
+
+#     plt.show()
+
+#     return anchor_positions
+
 def get_tx_position(T_vuwb_to_uwbtx, data):
     positions = []
     for pose in data: # Loop through until you find a pose that is not an outlier

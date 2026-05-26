@@ -179,6 +179,7 @@ def post_process(args):
     aligned_slam_json = []
     body_slam_aligned_tum_traj = []
     body_live_slam_aligned_tum_traj = []
+    aligned_live_slam_json = []
     if args.align:
 
         if real_failures:
@@ -187,16 +188,34 @@ def post_process(args):
 
             interval = json.load(open(f'./real_fails/{args.trial_name}_nuc{args.id}_fail.json','r'))
             all_data_start_ts = metadata["start_ns"] * 1e-9
-            fail_end_ts = interval[0]["end"] + all_data_start_ts
+            fail_end_ts = interval[0]["end"] + all_data_start_ts      
             body_slam_aligned_tum_traj, body_live_slam_aligned_tum_traj = bonus_umeyama_alignment(body_opti_HTMs, body_slam_HTMs, body_live_slam_HTMs, fail_end_ts)
 
             #TODO: Remove
             # body_live_slam_aligned_tum_traj = body_slam_aligned_tum_traj
+            
         
             def identity(T_body_to_world): # Already in body frame.
                 return T_body_to_world
             aligned_live_slam_body_poses, aligned_live_slam_body_velocities = aggregate_tracker(identity, np.array(body_live_slam_aligned_tum_traj))
             # Each pose is the IMU pose in the optitrack world frame.
+            aligned_live_slam_json = [ {
+                    "t": float(body_pose[0]),
+                    "type": "aligned_live_slam_pose",
+                    "T_body_world" : body_pose[1:].reshape((4,4)),
+                    "v_world": {
+                            "vx": float(body_v[1]),
+                            "vy": float(body_v[2]),
+                            "vz": float(body_v[3])
+                    }
+                } for body_pose, body_v in zip( list(aligned_live_slam_body_poses), list(aligned_live_slam_body_velocities))]
+            
+            # Overwrite aligned slam json with the live - SLAM output
+            def identity(T_body_to_world): # Already in body frame.
+                return T_body_to_world
+            aligned_slam_body_poses, aligned_slam_body_velocities = aggregate_tracker(identity, np.array(body_slam_aligned_tum_traj))
+            # Each pose is the IMU pose in the optitrack world frame.
+            # If we passed a valid frequency to subsample to
             aligned_slam_json = [ {
                     "t": float(body_pose[0]),
                     "type": "aligned_slam_pose",
@@ -206,8 +225,8 @@ def post_process(args):
                             "vy": float(body_v[2]),
                             "vz": float(body_v[3])
                     }
-                } for body_pose, body_v in zip( list(aligned_live_slam_body_poses), list(aligned_live_slam_body_velocities))]
-            # Overwrite aligned slam json with the live - SLAM output
+                } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
+
 
         else:
 
@@ -265,21 +284,32 @@ def post_process(args):
                     j["status"] = "tracking"
             if len(intervals) == 0: 
                 for j in aligned_slam_json: j["status"] = "tracking"
+
+        
+        for j in aligned_live_slam_json:
+            for interval in intervals:
+                if (START + interval["start"]) < j["t"] < (START+interval["end"]):
+                    j["status"] = "lost"
+                else:
+                    j["status"] = "tracking"
+            if len(intervals) == 0: 
+                for j in aligned_live_slam_json: j["status"] = "tracking"
     else:
         for j in slam_json: j["status"] = "tracking"
         for j in aligned_slam_json: j["status"] = "tracking"
+        for j in aligned_live_slam_json: j["status"] = "tracking"
 
 
     synth_uwb_json = []
     # synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, outpath)
     
     # Compose the final factor graph dataset
-    all_data = uwb_json + imu_json + opti_json + slam_json + synth_uwb_json + aligned_slam_json
+    all_data = uwb_json + imu_json + opti_json + slam_json + synth_uwb_json + aligned_slam_json + aligned_live_slam_json
     for mes in all_data: mes["src"] = ID
 
     ### Copy all world information: T, anchors, apriltags, to output
 
-    if args.opti:
+    if args.opti is not None:
         out_anchors = open(f'{outpath}/anchors.json', 'w')
         json.dump(anchor_positions, out_anchors, cls=NumpyEncoder, indent=1)
 

@@ -179,4 +179,5 @@ if __name__ == "__main__":
 
     for id in [2,3,4]:
         annotated_uwb = generate_parham_data(id, merged_all, anchor_positions, gt_trajectories, T, args.trial_name)
+        error_analysis(id, merged_all, anchor_positions, gt_trajectories, T)
         json.dump(annotated_uwb, open(f'./filter_dev_data/{id}/{args.trial_name}.json', 'w'), cls=NumpyEncoder, indent=1)

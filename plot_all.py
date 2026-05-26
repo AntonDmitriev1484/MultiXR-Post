@@ -32,6 +32,7 @@ def plot_trial(
     opti_stride=-2,
     est_stride=-2,
     est_path=None,          # <-- added
+    show_live_slam=False,
     run_config="",
     label_text="",
     anchors=False,
@@ -83,6 +84,9 @@ def plot_trial(
     aligned_slam_poses = []
     lost_aligned_slam_poses = []
 
+    aligned_slam_use = "aligned_slam_pose"
+    if show_live_slam: aligned_slam_use = "aligned_live_slam_pose"
+
     # ------------------------------
     # Parse SLAM + OptiTrack
     # ------------------------------
@@ -98,7 +102,7 @@ def plot_trial(
             else:
                 slam_poses.append(pose)
                 lost_slam_poses.append(None)
-        elif ( item.get("type") == "aligned_slam_pose"):
+        elif ( item.get("type") == aligned_slam_use):
             pose = np.array(item["T_body_world"])
             if item.get("status") == "lost":
                 aligned_slam_poses.append(None)
