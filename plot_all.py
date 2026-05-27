@@ -290,6 +290,7 @@ def main():
     parser.add_argument("--anchors", action="store_true")
     parser.add_argument("--transforms_json", default=None)
     parser.add_argument("--calibration", action="store_true")
+    parser.add_argument("--live_slam", action="store_true")
 
     args = parser.parse_args()
 
@@ -301,6 +302,7 @@ def main():
         slam_stride=args.slam,
         opti_stride=args.opti,
         anchors=args.anchors,
+        show_live_slam=args.live_slam,
         transforms_json=args.transforms_json,
         calibration=args.calibration,
     )

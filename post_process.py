@@ -263,7 +263,11 @@ def post_process(args):
         # Go through the failure intervals, tag all poses in this interval as "lost"
         # Later GTSAM can use this tag to not use these poses in fusion.
         # Note: Failures are specified in s, relative to the start of the rosbag.
-        intervals = json.load(open(f'./{ID}/synth_failures/{args.trial_name}.json','r'))
+        try:
+            intervals = json.load(open(f'./{ID}/synth_failures/{args.trial_name}.json','r'))
+        except Exception as err:
+            print("No synth failures detected, setting intervals = []")
+            intervals = []
 
     if real_failures or args.synth_failures:
         START = metadata["start_ns"] * 1e-9
@@ -306,6 +310,25 @@ def post_process(args):
     # Compose the final factor graph dataset
     all_data = uwb_json + imu_json + opti_json + slam_json + synth_uwb_json + aligned_slam_json + aligned_live_slam_json
     for mes in all_data: mes["src"] = ID
+
+
+    ### Hard coding things for evaluation
+    # Remove Node 2 from being used in multi2_board_loss3, it has un-controlled tracking loss.
+    if args.trial_name == "multi2_board_loss3":
+        for j in all_data:
+            if j["src"] == 2:
+                if j["type"] == "aligned_slam_pose": j["status"] = "lost"
+                if j["type"] == "aligned_live_slam_pose": j["status"] = "lost"
+                if j["type"] == "slam_pose": j["status"] = "lost" 
+
+    # Remove Node 5 from being used in multi2_.._nlos trials. Optitrack didn't track it properly.
+    if args.trial_name == "multi2_human_nlos" or args.trial_name == "multi2_object_nlos":
+        copy_all_data = []
+        for j in all_data:
+            if (j["type"] == "uwb"): 
+                if not (j["id"] == 5): copy_all_data.append(j)
+            else: copy_all_data.append(j)
+        all_data = copy_all_data
 
     ### Copy all world information: T, anchors, apriltags, to output
 
@@ -394,6 +417,7 @@ if __name__ == "__main__":
             # Record transforms
             json.dump(vars(T), open(f'{outpath}/transforms{user}.json', 'w'), cls=NumpyEncoder, indent=1)
             
+        
         # Mirror UWB ranges. This is something the Beluga firmware could report, but doesn't.
         # It only logs range on the report, not on the final, this means the responder compute the range, but never logs it.
         # This will effectively double our ranges.
@@ -405,9 +429,7 @@ if __name__ == "__main__":
                 j_["src"] = j["id"]
                 j_["id"] = temp_src
                 mirrored_uwb.append(j_)
-        merged_all += mirrored_uwb
-
-        ### !!!!! TODO !!!! MIRRORING IS OFFF !!!!!
+        merged_all += mirrored_uwb           
 
         # Synthetsize ranges in place of real ones.
         # merged_all = range_synthesizer3(merged_all, anchor_positions, gt_trajectories, T, 0.2)
@@ -417,7 +439,7 @@ if __name__ == "__main__":
 
         # UWB error analysis
         if args.check_uwb_error:
-            error_analysis(4, merged_all, anchor_positions, gt_trajectories, T)
+            error_analysis(4, merged_all, anchor_positions, gt_trajectories, T, users=[2,3,4])
 
 
     else:

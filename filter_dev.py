@@ -145,14 +145,18 @@ if __name__ == "__main__":
     NO_SUBSAMPLE = -10
     parser = argparse.ArgumentParser(description="Stream collector")
     parser.add_argument("trial_name" , type=str)
+    parser.add_argument("--single", type=int)
 
     args = parser.parse_args()
 
 
     merged_all = []
     gt_trajectories = []
+
+    users = [2,3,4]
+    if args.single is not None: users = [args.single]
     
-    for user in [2,3,4]: # Hard coded removing 3 for opti_multi1
+    for user in users: # Hard coded removing 3 for opti_multi1
         print(f"\nNUC{user}\n")
 
         args.id = user # Override whatever ID gets passed in
@@ -177,7 +181,7 @@ if __name__ == "__main__":
 
     # error_analysis(4, merged_all, anchor_positions, gt_trajectories, T)
 
-    for id in [2,3,4]:
-        annotated_uwb = generate_parham_data(id, merged_all, anchor_positions, gt_trajectories, T, args.trial_name)
-        error_analysis(id, merged_all, anchor_positions, gt_trajectories, T)
+    for id in users:
+        annotated_uwb = generate_parham_data(id, merged_all, anchor_positions, gt_trajectories, T, args.trial_name, users)
+        error_analysis(id, merged_all, anchor_positions, gt_trajectories, T, users)
         json.dump(annotated_uwb, open(f'./filter_dev_data/{id}/{args.trial_name}.json', 'w'), cls=NumpyEncoder, indent=1)

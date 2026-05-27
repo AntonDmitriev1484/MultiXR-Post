@@ -170,9 +170,9 @@ def range_synthesizer2(START, END, body_traj, T, outpath, f_uwb=5/4.0, std=0.01)
 
 
 # Compute range error for inter-user and user-anchor ranges.
-def error_analysis( id, multi_all, anchors, gt_trajectories, T):
+def error_analysis( id, multi_all, anchors, gt_trajectories, T, users):
 
-    mobile_nodes = [2,3,4]
+    mobile_nodes = users
     # First transform body_traj to uwb_rx_traj
 
     range_errors = {}
@@ -291,10 +291,10 @@ def error_analysis( id, multi_all, anchors, gt_trajectories, T):
 
 
 # Compute range error for inter-user and user-anchor ranges.
-def generate_parham_data( id, multi_all, anchors, gt_trajectories, T, trial_name):
+def generate_parham_data( id, multi_all, anchors, gt_trajectories, T, trial_name, users):
 
     
-    mobile_nodes = [2,3,4]
+    mobile_nodes = users
     # First transform body_traj to uwb_rx_traj
 
     range_errors = {}
@@ -311,6 +311,8 @@ def generate_parham_data( id, multi_all, anchors, gt_trajectories, T, trial_name
     for j in uwb:
         if j["id"] in mobile_nodes:
 
+            # print(len(gt_trajectories))
+            print(f"{j['id']-2}=")
             other_body_traj = np.array(gt_trajectories[j["id"]-2])
             body_traj = np.array(gt_trajectories[j["src"]-2])
 
