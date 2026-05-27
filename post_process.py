@@ -39,6 +39,84 @@ class NumpyEncoder(json.JSONEncoder):
             return vars(obj)
         return super().default(obj)
 
+### Process optitrack data before alignment
+def prep_optitrack_output(args, START, END, T, opti_data):
+    opti_json = []
+    body_opti_tum_traj = [] # Explain: Used later in UWB error code
+    body_opti_HTMs = [] # Explain: Used later in Umeyama alignment
+    if args.opti is not None:
+        def opti_tracked_body_to_my_body(T_head_to_world):
+            return T.T_head_to_body @ np.linalg.inv(T_head_to_world)
+        
+        opti_body_poses, opti_body_velocities = aggregate_tracker(opti_tracked_body_to_my_body, np.array(opti_data))
+        body_opti_HTMs = opti_body_poses
+        # Each pose is the IMU pose in the optitrack world frame.
+
+        # aggregate_tracker returns [timestamp, flattened HTM]
+        # for opti_tum_traj we need to convert back to tum
+        for pose in opti_body_poses: body_opti_tum_traj.append(slam_HTM_to_TUM(pose))
+
+        # If we passed a valid frequency to subsample to
+        opti_freq = len(opti_data) / (END-START)
+        if opti_freq > args.opti > 0:
+            skip = math.ceil(opti_freq / args.opti) # Number of poses to skip in subsampling to synth slam frequency
+            opti_body_poses = np.array(opti_body_poses)
+            opti_body_poses = opti_body_poses[::skip] # Finally, subsample to required frequency
+
+        opti_json = [ {
+                "t": float(body_pose[0]),
+                "type": "opti_pose",
+                "T_body_world" : body_pose[1:].reshape((4,4)),
+            } for body_pose, body_v in zip( list(opti_body_poses), list(opti_body_velocities))]
+        
+    print("INNN")
+    return opti_json, body_opti_HTMs, body_opti_tum_traj
+
+### Process SLAM data before alignment
+def prep_orbslam3_output(args, START, END, T, post_slam_data, live_slam_data=[], real_failures=False):
+    post_slam_json = []
+    live_slam_json = []
+    body_post_slam_HTMs = [] # Used later in Umeyama alignment
+    body_live_slam_HTMs = [] # Used later in Umeyama alginment, if real failures.
+
+    if args.slam is not None:
+        post_slam_data[:,0] *= 1e-9 # Adjust timestamps to be in 's'
+
+        def slam_tracked_body_to_my_body(T_cam1_to_sorigin): # SLAM quat gives you the transform from cam1 frame to slam origin
+            return T.T_cam1_to_body @ np.linalg.inv(T_cam1_to_sorigin)
+
+        slam_body_poses, slam_body_velocities = aggregate_tracker(slam_tracked_body_to_my_body, post_slam_data)
+        body_post_slam_HTMs = slam_body_poses
+        # Each pose is the IMU pose in the slam frame. i.e. T_slamworld_to_imu. This is what plotting assumes.
+
+        # If we passed a valid frequency to subsample to
+        slam_freq = len(post_slam_data) / (END-START)
+        if slam_freq > args.slam > 0:
+            skip = math.ceil(slam_freq / args.slam) # Number of poses to skip in subsampling to synth slam frequency
+            slam_body_poses = np.array(slam_body_poses)
+            slam_body_poses = slam_body_poses[::skip] # Finally, subsample to required frequency
+
+        # Convert from nparray to json format
+        post_slam_json = [ {
+                "t": float(body_pose[0]),
+                "type": "slam_pose",
+                "T_body_world" : body_pose[1:].reshape((4,4)),
+
+            } for body_pose, body_v in zip( list(slam_body_poses), list(slam_body_velocities))]
+        
+        if real_failures:
+            live_slam_data[:,0] *= 1e-9 # Adjust timestamps to be in 's'
+            live_slam_body_poses, live_slam_body_velocities = aggregate_tracker(slam_tracked_body_to_my_body, live_slam_data)
+            body_live_slam_HTMs = live_slam_body_poses
+            # IF THERES A REAL FAILURE, OVERWRITE unaligned save_traj SLAM with live SLAM
+            live_slam_json = [ {
+                    "t": float(body_pose[0]),
+                    "type": "slam_pose",
+                    "T_body_world" : body_pose[1:].reshape((4,4)),
+
+                } for body_pose, body_v in zip( list(live_slam_body_poses), list(live_slam_body_velocities))]
+
+    return post_slam_json, live_slam_json, body_post_slam_HTMs, body_live_slam_HTMs
 
 def post_process(args):
 
@@ -49,18 +127,18 @@ def post_process(args):
     os.makedirs(out_world, exist_ok=True)
 
     in_slam = ""
-    slam_data = []
+    post_slam_data = []
     in_real_fails = f'./real_fails/'
     real_failures = f"{args.trial_name}_nuc{args.id}_slam_cam_traj.csv" in os.listdir(in_real_fails)
 
     # SLAM 'save_traj' trajectory
     in_slam = f'./{ID}/orbslam/out/{args.trial_name}_nuc{ID}_raw_cam_traj.txt'
-    slam_data = np.loadtxt(in_slam)
+    post_slam_data = np.loadtxt(in_slam)
 
-    live_slam_data = []
     # SLAM 'ros1 bag trajectory'
-    if real_failures: 
-        print("REAL SLAM FAILURE CASE, reading from ros1 bag csv")
+    live_slam_data = []
+    if real_failures:
+        print("REAL SLAM FAILURE CASE, reading live trajectory frp ros1 bag csv")
         live_slam_data = parse_ros1_bag_csv(f'./real_fails/{args.trial_name}_nuc{args.id}_slam_cam_traj.csv')
 
     inpath = f'./{ID}/collect/{args.trial_name}_nuc{ID}_raw'
@@ -76,7 +154,7 @@ def post_process(args):
     # # Filter for messages within bag timestamp range.
     # START = metadata["start_ns"] * 1e-9
 
-    START = slam_data[0,0] * 1e-9 # Adjust timestamps to be in 's'
+    START = post_slam_data[0,0] * 1e-9 # Adjust timestamps to be in 's'
 
     END = metadata["end_ns"] * 1e-9
     print(f"Data duration {START} - {END}")
@@ -105,76 +183,24 @@ def post_process(args):
         anchor_positions = compute_anchors(opti_anchor_trajectories, T.T_optiuwb_to_uwbtx)
 
     ### Process SLAM data
-    slam_json = []
-    body_slam_HTMs = [] # Used later in Umeyama alignment
-    body_live_slam_HTMs = [] # Used later in Umeyama alginment, if real failures.
+    # All trajectories have a post SLAM, and if they have real failures, they will have a live SLAM as well.
+    # Convert to body frame, subsample, 
+    # output body in SLAM world frame trajectory as jsons, and HTMs (for later alignment)
+    post_slam_json, live_slam_json, body_post_slam_HTMs, body_live_slam_HTMs = (
+        prep_orbslam3_output(args, START, END, T, post_slam_data, live_slam_data, real_failures)
+        if args.slam is not None
+        else ([], [], [], [])
+    )
 
-    if args.slam is not None:
-        slam_data[:,0] *= 1e-9 # Adjust timestamps to be in 's'
-
-        def slam_tracked_body_to_my_body(T_cam1_to_sorigin): # SLAM quat gives you the transform from cam1 frame to slam origin
-            return T.T_cam1_to_body @ np.linalg.inv(T_cam1_to_sorigin)
-
-        slam_body_poses, slam_body_velocities = aggregate_tracker(slam_tracked_body_to_my_body, slam_data)
-        body_slam_HTMs = slam_body_poses
-        # Each pose is the IMU pose in the slam frame. i.e. T_slamworld_to_imu. This is what plotting assumes.
-
-        # If we passed a valid frequency to subsample to
-        slam_freq = len(slam_data) / (END-START)
-        if slam_freq > args.slam > 0:
-            skip = math.ceil(slam_freq / args.slam) # Number of poses to skip in subsampling to synth slam frequency
-            slam_body_poses = np.array(slam_body_poses)
-            slam_body_poses = slam_body_poses[::skip] # Finally, subsample to required frequency
-
-        # Convert from nparray to json format
-        slam_json = [ {
-                "t": float(body_pose[0]),
-                "type": "slam_pose",
-                "T_body_world" : body_pose[1:].reshape((4,4)),
-
-            } for body_pose, body_v in zip( list(slam_body_poses), list(slam_body_velocities))]
-        
-        if real_failures:
-            live_slam_data[:,0] *= 1e-9 # Adjust timestamps to be in 's'
-            live_slam_body_poses, live_slam_body_velocities = aggregate_tracker(slam_tracked_body_to_my_body, live_slam_data)
-            body_live_slam_HTMs = live_slam_body_poses
-            # IF THERES A REAL FAILURE, OVERWRITE unaligned save_traj SLAM with live SLAM
-            slam_json = [ {
-                    "t": float(body_pose[0]),
-                    "type": "slam_pose",
-                    "T_body_world" : body_pose[1:].reshape((4,4)),
-
-                } for body_pose, body_v in zip( list(live_slam_body_poses), list(live_slam_body_velocities))]
-
-    ### Process optitrack data
-    opti_json = []
-    body_opti_tum_traj = [] # Explain: My default pose output so I can automate evo in eval.py
-    body_opti_HTMs = []
-    if args.opti is not None:
-        def opti_tracked_body_to_my_body(T_head_to_world):
-            return T.T_head_to_body @ np.linalg.inv(T_head_to_world)
-        
-        opti_body_poses, opti_body_velocities = aggregate_tracker(opti_tracked_body_to_my_body, np.array(opti_data))
-        body_opti_HTMs = opti_body_poses
-        # Each pose is the IMU pose in the optitrack world frame.
-
-        # aggregate_tracker returns [timestamp, flattened HTM]
-        # for opti_tum_traj we need to convert back to tum
-        for pose in opti_body_poses: body_opti_tum_traj.append(slam_HTM_to_TUM(pose))
-
-        # If we passed a valid frequency to subsample to
-        opti_freq = len(opti_data) / (END-START)
-        if opti_freq > args.opti > 0:
-            skip = math.ceil(opti_freq / args.opti) # Number of poses to skip in subsampling to synth slam frequency
-            opti_body_poses = np.array(opti_body_poses)
-            opti_body_poses = opti_body_poses[::skip] # Finally, subsample to required frequency
-
-        opti_json = [ {
-                "t": float(body_pose[0]),
-                "type": "opti_pose",
-                "T_body_world" : body_pose[1:].reshape((4,4)),
-            } for body_pose, body_v in zip( list(opti_body_poses), list(opti_body_velocities))]
-    
+    ### Process Optitrack data
+    # Convert to body frame, subsample, 
+    # output body in optitrack world frame trajectory as jsons, and HTMs (for later alignment)
+    # ouptut as a TUM trajectory, for later UWB error calculation code
+    opti_json, body_opti_HTMs, body_opti_tum_traj = (
+        prep_optitrack_output(args, START, END, T, opti_data)
+        if args.opti is not None
+        else ([], [], [])
+    )
     
     aligned_slam_json = []
     body_slam_aligned_tum_traj = []
@@ -189,7 +215,7 @@ def post_process(args):
             interval = json.load(open(f'./real_fails/{args.trial_name}_nuc{args.id}_fail.json','r'))
             all_data_start_ts = metadata["start_ns"] * 1e-9
             fail_end_ts = interval[0]["end"] + all_data_start_ts      
-            body_slam_aligned_tum_traj, body_live_slam_aligned_tum_traj = bonus_umeyama_alignment(body_opti_HTMs, body_slam_HTMs, body_live_slam_HTMs, fail_end_ts)
+            body_slam_aligned_tum_traj, body_live_slam_aligned_tum_traj = bonus_umeyama_alignment(body_opti_HTMs, body_post_slam_HTMs, body_live_slam_HTMs, fail_end_ts)
 
             #TODO: Remove
             # body_live_slam_aligned_tum_traj = body_slam_aligned_tum_traj
@@ -232,7 +258,7 @@ def post_process(args):
 
             # Align the body's SLAM 'save_traj' trajectory to the Optitrack trajectory
             # Places our SLAM trajectory in a shared coordinate frame
-            body_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_slam_HTMs)
+            body_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
 
             def identity(T_body_to_world): # Already in body frame.
                 return T_body_to_world
@@ -240,7 +266,7 @@ def post_process(args):
             # Each pose is the IMU pose in the optitrack world frame.
 
             # If we passed a valid frequency to subsample to
-            slam_freq = len(slam_data) / (END-START)
+            slam_freq = len(post_slam_data) / (END-START)
             if slam_freq > args.slam > 0:
                 skip = math.ceil(slam_freq / args.slam) # Number of poses to skip in subsampling to synth slam frequency
                 aligned_slam_body_poses = np.array(aligned_slam_body_poses)
@@ -271,14 +297,14 @@ def post_process(args):
 
     if real_failures or args.synth_failures:
         START = metadata["start_ns"] * 1e-9
-        for j in slam_json:
+        for j in post_slam_json:
             for interval in intervals:
                 if (START + interval["start"]) < j["t"] < (START+interval["end"]):
                     j["status"] = "lost"
                 else:
                     j["status"] = "tracking"
             if len(intervals) == 0: 
-                for j in slam_json: j["status"] = "tracking"
+                for j in post_slam_json: j["status"] = "tracking"
 
         for j in aligned_slam_json:
             for interval in intervals:
@@ -299,16 +325,15 @@ def post_process(args):
             if len(intervals) == 0: 
                 for j in aligned_live_slam_json: j["status"] = "tracking"
     else:
-        for j in slam_json: j["status"] = "tracking"
+        for j in post_slam_json: j["status"] = "tracking"
         for j in aligned_slam_json: j["status"] = "tracking"
         for j in aligned_live_slam_json: j["status"] = "tracking"
 
 
     synth_uwb_json = []
-    # synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, outpath)
     
     # Compose the final factor graph dataset
-    all_data = uwb_json + imu_json + opti_json + slam_json + synth_uwb_json + aligned_slam_json + aligned_live_slam_json
+    all_data = uwb_json + imu_json + opti_json + post_slam_json + synth_uwb_json + aligned_slam_json + aligned_live_slam_json
     for mes in all_data: mes["src"] = ID
 
 
@@ -345,11 +370,11 @@ def post_process(args):
     print(f" Measured Synth UWB frequency {len(synth_uwb_json) / (END-START)}")
     print(f" Measured UWB frequency {len(uwb_json) / (END-START)}")
     if args.opti: print(f" Measured optitrack frequency {len(opti_data) / (END-START)}")
-    print(f" Measured SLAM frequency {len(slam_data) / (END-START)}")
+    print(f" Measured SLAM frequency {len(post_slam_data) / (END-START)}")
 
     print("Checking frequency of subsampled output")
     if args.opti: print(f" Measured subsampled optitrack frequency {len(opti_json) / (END-START)}")
-    print(f" Measured subsampled SLAM frequency {len(slam_json) / (END-START)}")
+    print(f" Measured subsampled SLAM frequency {len(post_slam_json) / (END-START)}")
 
 
     # Filter to make sure all messages ( and data jsons ) fall within the ROS recording time interval, (because some of them don't apparently)
@@ -432,7 +457,6 @@ if __name__ == "__main__":
         merged_all += mirrored_uwb           
 
         # Synthetsize ranges in place of real ones.
-        # merged_all = range_synthesizer3(merged_all, anchor_positions, gt_trajectories, T, 0.2)
 
         merged_all = sorted(merged_all, key=lambda x: x["t"])
         json.dump(merged_all, open(outpath+"/all.json", 'w'), cls=NumpyEncoder, indent=1)
