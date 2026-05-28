@@ -90,13 +90,15 @@ def plot_trial(
     # ------------------------------
     # Parse SLAM + OptiTrack
     # ------------------------------
+
+    tracking = True
     for item in all_data:
         if (
             item.get("type") in ("slam_pose")
             and "T_body_world" in item
         ):
             pose = np.array(item["T_body_world"])
-            if item.get("status") == "lost":
+            if item.get("status") == "imu" or item.get("status") == "newmap":
                 slam_poses.append(None)
                 lost_slam_poses.append(pose)
             else:
@@ -104,17 +106,21 @@ def plot_trial(
                 lost_slam_poses.append(None)
         elif ( item.get("type") == aligned_slam_use):
             pose = np.array(item["T_body_world"])
-            if item.get("status") == "lost":
+            if item.get("status") == "tracking":
+                aligned_slam_poses.append(pose)
+                if not tracking: lost_aligned_slam_poses.append(pose) # Ensure continuity between red lost line and the visual recovered trajectory
+                lost_aligned_slam_poses.append(None)
+
+            else:
                 aligned_slam_poses.append(None)
                 lost_aligned_slam_poses.append(pose)
-            else:
-                aligned_slam_poses.append(pose)
-                lost_aligned_slam_poses.append(None)
+                tracking = False
         elif (
             item.get("type") == "opti_pose"
             and "T_body_world" in item
         ):
             opti_poses.append(np.array(item["T_body_world"]))
+
 
     # Aligned SLAM will automatically overrule regular SLAM in plotting
     if len(aligned_slam_poses) > 0:

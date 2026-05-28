@@ -69,7 +69,6 @@ def prep_optitrack_output(args, START, END, T, opti_data):
                 "T_body_world" : body_pose[1:].reshape((4,4)),
             } for body_pose, body_v in zip( list(opti_body_poses), list(opti_body_velocities))]
         
-    print("INNN")
     return opti_json, body_opti_HTMs, body_opti_tum_traj
 
 ### Process SLAM data before alignment
@@ -78,6 +77,8 @@ def prep_orbslam3_output(args, START, END, T, post_slam_data, live_slam_data=[],
     live_slam_json = []
     body_post_slam_HTMs = [] # Used later in Umeyama alignment
     body_live_slam_HTMs = [] # Used later in Umeyama alginment, if real failures.
+
+    print(f"{real_failures=}")
 
     if args.slam is not None:
         post_slam_data[:,0] *= 1e-9 # Adjust timestamps to be in 's'
@@ -117,6 +118,104 @@ def prep_orbslam3_output(args, START, END, T, post_slam_data, live_slam_data=[],
                 } for body_pose, body_v in zip( list(live_slam_body_poses), list(live_slam_body_velocities))]
 
     return post_slam_json, live_slam_json, body_post_slam_HTMs, body_live_slam_HTMs
+
+### Just annotate
+def prep_annotate_slam_output(args, START, END, T, aligned_slam_data, mes_type, real_failures=None):
+
+    real_failures = real_failures[0]
+
+    def identity(T_body_to_world): # Already in body frame.
+        return T_body_to_world
+    print(aligned_slam_data.shape)
+    # Aggregate is basically just for format conversion
+    aligned_slam_body_poses, aligned_slam_body_velocities = aggregate_tracker(identity, np.array(aligned_slam_data))
+    # Each pose is the IMU pose in the optitrack world frame.
+    print(aligned_slam_body_poses.shape)
+
+    fail_start_t = START + real_failures["start"] # Timestamp failure starts and we rely on IMU
+    new_map_start_t = START + real_failures["init_newmap"] # Timestamp that we start tracking a new map
+    relocalized_t = START + real_failures["end"] # Timestamp we end failure
+    imu_only_idxs = np.where( 
+        (new_map_start_t >= aligned_slam_body_poses[:,0]) & 
+        (aligned_slam_body_poses[:,0]>= fail_start_t)
+        )[0]
+    newmap_idxs = np.where( 
+        (relocalized_t >= aligned_slam_body_poses[:,0]) &
+        (aligned_slam_body_poses[:,0] >= new_map_start_t)
+        )[0]
+
+    # Also do all of the labeling in here of tracking vs no tracking
+
+    aligned_live_slam_json = [ {
+            "t": float(body_pose[0]),
+            "type": mes_type,
+            "T_body_world" : body_pose[1:].reshape((4,4)),
+            "v_world": {
+                    "vx": float(body_v[1]),
+                    "vy": float(body_v[2]),
+                    "vz": float(body_v[3])
+            }
+        } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
+    
+    # Apply tracking status labels
+    for i in range(len(aligned_live_slam_json)):
+        if i in imu_only_idxs: aligned_live_slam_json[i]["status"] = "imu"
+        elif i in newmap_idxs: aligned_live_slam_json[i]["status"] = "newmap"
+        else: aligned_live_slam_json[i]["status"] = "tracking"
+
+    return aligned_live_slam_json
+
+### Annotate and transform
+def prep_synth_fail_slam_output(args, START, END, T, aligned_slam_data, mes_type, synth_failures=None):
+
+    def identity(T_body_to_world): # Already in body frame.
+        return T_body_to_world
+    # Aggregate is basically just for format conversion
+    aligned_slam_body_poses, aligned_slam_body_velocities = aggregate_tracker(identity, np.array(aligned_slam_data))
+
+    imu_only_idx = []
+    newmap_idxs = []
+    if synth_failures is not None:
+
+        synth_failures = synth_failures[0] # For now just assuming 1 failure
+        fail_start_t = START + synth_failures["start"] # Timestamp failure starts and we rely on IMU
+        new_map_start_t = START + synth_failures["init_newmap"] # Timestamp that we start tracking a new map
+        relocalized_t = START + synth_failures["end"] # Timestamp we end failure
+
+        imu_only_idxs = np.where( (new_map_start_t >= aligned_slam_body_poses[:,0]) & (aligned_slam_body_poses[:,0]>= fail_start_t))[0]
+        newmap_idxs = np.where( (relocalized_t >= aligned_slam_body_poses[:,0]) & (aligned_slam_body_poses[:,0] >= new_map_start_t))[0]
+        # Create the newmap segment that starts at the origin
+        # newmap_idxs = np.where( relocalized_t >= aligned_slam_body_poses[:,0] >= new_map_start_t)
+        
+        traj_origin = aligned_slam_body_poses[0,1:].reshape((4,4)).copy()
+        new_map_origin = aligned_slam_body_poses[newmap_idxs[0],1:].reshape((4,4)).copy() # This is world to body
+        for i in newmap_idxs:
+            body_pose = aligned_slam_body_poses[i,1:].reshape((4,4)).copy() # This is world to body
+            new_map_pose =  body_pose @ np.linalg.inv(new_map_origin) @ traj_origin
+            aligned_slam_body_poses[i,1:] = new_map_pose.flatten()
+
+    # Also do all of the labeling in here of tracking vs no tracking
+
+    aligned_post_slam_json = [ {
+            "t": float(body_pose[0]),
+            "type": mes_type,
+            "T_body_world" : body_pose[1:].reshape((4,4)),
+            "v_world": {
+                    "vx": float(body_v[1]),
+                    "vy": float(body_v[2]),
+                    "vz": float(body_v[3])
+            }
+        } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
+    
+    # Apply tracking status labels
+    for i in range(len(aligned_post_slam_json)):
+        if i in imu_only_idxs: aligned_post_slam_json[i]["status"] = "imu"
+        elif i in newmap_idxs: aligned_post_slam_json[i]["status"] = "newmap"
+        else: aligned_post_slam_json[i]["status"] = "tracking"
+
+    body_slam_aligned_tum_traj = [HTM_to_TUM(p) for p in aligned_slam_body_poses]
+
+    return aligned_post_slam_json, body_slam_aligned_tum_traj
 
 def post_process(args):
 
@@ -201,139 +300,56 @@ def post_process(args):
         if args.opti is not None
         else ([], [], [])
     )
-    
-    aligned_slam_json = []
-    body_slam_aligned_tum_traj = []
-    body_live_slam_aligned_tum_traj = []
+
+    ### Align SLAM trajectories to optitrack shared frame
+    aligned_post_slam_json = []
     aligned_live_slam_json = []
+    # Get HTMs here
+    body_post_slam_aligned_tum_traj = []
+    body_live_slam_aligned_tum_traj = []
     if args.align:
 
         if real_failures:
             # Compute alignment using the SLAM 'save_traj' trajectory to the Optitrack trajectory
             # apply alignment to SLAM 'ros1 bag' trajectory
 
-            interval = json.load(open(f'./real_fails/{args.trial_name}_nuc{args.id}_fail.json','r'))
+            real_failures = json.load(open(f'./real_fails/{args.trial_name}_nuc{args.id}_fail.json','r'))
             all_data_start_ts = metadata["start_ns"] * 1e-9
-            fail_end_ts = interval[0]["end"] + all_data_start_ts      
-            body_slam_aligned_tum_traj, body_live_slam_aligned_tum_traj = bonus_umeyama_alignment(body_opti_HTMs, body_post_slam_HTMs, body_live_slam_HTMs, fail_end_ts)
+            fail_end_ts = real_failures[0]["end"] + all_data_start_ts      
+            # output body live slam trajectory - for use in evaluation
+            body_post_slam_aligned_tum_traj, body_live_slam_aligned_tum_traj = bonus_umeyama_alignment(body_opti_HTMs, body_post_slam_HTMs, body_live_slam_HTMs, fail_end_ts)
 
-            #TODO: Remove
-            # body_live_slam_aligned_tum_traj = body_slam_aligned_tum_traj
+            # annotate the live slam trajectory with real failures file - for use in plotting
+            aligned_live_slam_json = prep_annotate_slam_output(args, all_data_start_ts, END, T, np.array(body_live_slam_aligned_tum_traj), "aligned_live_slam_pose", real_failures)
+
+            # annotate the post slam trajectory in the same way - for use in graph
+            aligned_post_slam_json = prep_annotate_slam_output(args, all_data_start_ts, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_slam_pose", real_failures)
             
-        
-            def identity(T_body_to_world): # Already in body frame.
-                return T_body_to_world
-            aligned_live_slam_body_poses, aligned_live_slam_body_velocities = aggregate_tracker(identity, np.array(body_live_slam_aligned_tum_traj))
-            # Each pose is the IMU pose in the optitrack world frame.
-            aligned_live_slam_json = [ {
-                    "t": float(body_pose[0]),
-                    "type": "aligned_live_slam_pose",
-                    "T_body_world" : body_pose[1:].reshape((4,4)),
-                    "v_world": {
-                            "vx": float(body_v[1]),
-                            "vy": float(body_v[2]),
-                            "vz": float(body_v[3])
-                    }
-                } for body_pose, body_v in zip( list(aligned_live_slam_body_poses), list(aligned_live_slam_body_velocities))]
-            
-            # Overwrite aligned slam json with the live - SLAM output
-            def identity(T_body_to_world): # Already in body frame.
-                return T_body_to_world
-            aligned_slam_body_poses, aligned_slam_body_velocities = aggregate_tracker(identity, np.array(body_slam_aligned_tum_traj))
-            # Each pose is the IMU pose in the optitrack world frame.
-            # If we passed a valid frequency to subsample to
-            aligned_slam_json = [ {
-                    "t": float(body_pose[0]),
-                    "type": "aligned_slam_pose",
-                    "T_body_world" : body_pose[1:].reshape((4,4)),
-                    "v_world": {
-                            "vx": float(body_v[1]),
-                            "vy": float(body_v[2]),
-                            "vz": float(body_v[3])
-                    }
-                } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
+        elif args.synth_failures: 
+            # For now lets just assume that I will never add a synthetic failure to a real failure trajectory
+            # otherwise the synthetic will overwrite the real failure annotations and it'll make a mess.
 
+            synth_failures = []
+            try:
+                synth_failures = json.load(open(f'./{ID}/synth_failures/{args.trial_name}.json','r'))
+            except Exception as err:
+                print("No synth failures detected, setting synth_failures = []")
 
-        else:
+            body_post_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
 
-            # Align the body's SLAM 'save_traj' trajectory to the Optitrack trajectory
-            # Places our SLAM trajectory in a shared coordinate frame
-            body_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
+            # annotate the post slam trajectory, for use in the graph
+            aligned_post_slam_json = prep_annotate_slam_output(args, START, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_slam_pose", synth_failures)
 
-            def identity(T_body_to_world): # Already in body frame.
-                return T_body_to_world
-            aligned_slam_body_poses, aligned_slam_body_velocities = aggregate_tracker(identity, np.array(body_slam_aligned_tum_traj))
-            # Each pose is the IMU pose in the optitrack world frame.
+            # add newmap deformation and IMU segment, 
+            # and annotate live slam trajectory for use in plotting (aligned_live_slam_json) and evaluation (body_live_slam_aligned_tum_traj)
+            aligned_live_slam_json, body_live_slam_aligned_tum_traj = prep_synth_fail_slam_output(args, START, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_live_slam_pose", synth_failures)
 
-            # If we passed a valid frequency to subsample to
-            slam_freq = len(post_slam_data) / (END-START)
-            if slam_freq > args.slam > 0:
-                skip = math.ceil(slam_freq / args.slam) # Number of poses to skip in subsampling to synth slam frequency
-                aligned_slam_body_poses = np.array(aligned_slam_body_poses)
-                aligned_slam_body_poses = aligned_slam_body_poses[::skip] # Finally, subsample to required frequency
-
-            aligned_slam_json = [ {
-                    "t": float(body_pose[0]),
-                    "type": "aligned_slam_pose",
-                    "T_body_world" : body_pose[1:].reshape((4,4)),
-                    "v_world": {
-                            "vx": float(body_v[1]),
-                            "vy": float(body_v[2]),
-                            "vz": float(body_v[3])
-                    }
-                } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
-
-    if real_failures:
-        intervals = json.load(open(f'./real_fails/{args.trial_name}_nuc{args.id}_fail.json','r'))
-    elif args.synth_failures:
-        # Go through the failure intervals, tag all poses in this interval as "lost"
-        # Later GTSAM can use this tag to not use these poses in fusion.
-        # Note: Failures are specified in s, relative to the start of the rosbag.
-        try:
-            intervals = json.load(open(f'./{ID}/synth_failures/{args.trial_name}.json','r'))
-        except Exception as err:
-            print("No synth failures detected, setting intervals = []")
-            intervals = []
-
-    if real_failures or args.synth_failures:
-        START = metadata["start_ns"] * 1e-9
-        for j in post_slam_json:
-            for interval in intervals:
-                if (START + interval["start"]) < j["t"] < (START+interval["end"]):
-                    j["status"] = "lost"
-                else:
-                    j["status"] = "tracking"
-            if len(intervals) == 0: 
-                for j in post_slam_json: j["status"] = "tracking"
-
-        for j in aligned_slam_json:
-            for interval in intervals:
-                if (START + interval["start"]) < j["t"] < (START+interval["end"]):
-                    j["status"] = "lost"
-                else:
-                    j["status"] = "tracking"
-            if len(intervals) == 0: 
-                for j in aligned_slam_json: j["status"] = "tracking"
-
-        
-        for j in aligned_live_slam_json:
-            for interval in intervals:
-                if (START + interval["start"]) < j["t"] < (START+interval["end"]):
-                    j["status"] = "lost"
-                else:
-                    j["status"] = "tracking"
-            if len(intervals) == 0: 
-                for j in aligned_live_slam_json: j["status"] = "tracking"
-    else:
-        for j in post_slam_json: j["status"] = "tracking"
-        for j in aligned_slam_json: j["status"] = "tracking"
-        for j in aligned_live_slam_json: j["status"] = "tracking"
 
 
     synth_uwb_json = []
     
     # Compose the final factor graph dataset
-    all_data = uwb_json + imu_json + opti_json + post_slam_json + synth_uwb_json + aligned_slam_json + aligned_live_slam_json
+    all_data = uwb_json + imu_json + opti_json + post_slam_json + synth_uwb_json + aligned_post_slam_json + aligned_live_slam_json
     for mes in all_data: mes["src"] = ID
 
 
@@ -385,7 +401,7 @@ def post_process(args):
 
     # Write body in optitrack trajectory  to a csv file for loading into EVO
     np.savetxt(f"{outpath}/opti.txt", np.array(body_opti_tum_traj), fmt="%.8f")
-    np.savetxt(f"{outpath}/aligned_slam.txt", np.array(body_slam_aligned_tum_traj), fmt="%.8f")
+    np.savetxt(f"{outpath}/aligned_slam.txt", np.array(body_post_slam_aligned_tum_traj), fmt="%.8f")
     np.savetxt(f"{outpath}/aligned_live_slam.txt", np.array(body_live_slam_aligned_tum_traj), fmt="%.8f")  
     # np.savetxt(f"{outpath}/opti_inv.txt", np.array(body_opti_inv_tum_traj), fmt="%.8f")
     # np.savetxt(f"{outpath}/slam_inv.txt", np.array(body_slam_inv_tum_traj), fmt="%.8f")
