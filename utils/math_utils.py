@@ -487,36 +487,36 @@ def bonus_umeyama_alignment(
     aligned_live_slam = apply_alignment(live_slam_traj)
 
     ### debug plotting
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
 
-    ax.plot(
-        opti_traj.positions_xyz[:, 0],
-        opti_traj.positions_xyz[:, 1],
-        opti_traj.positions_xyz[:, 2],
-        label="Opti"
-    )
+    # ax.plot(
+    #     opti_traj.positions_xyz[:, 0],
+    #     opti_traj.positions_xyz[:, 1],
+    #     opti_traj.positions_xyz[:, 2],
+    #     label="Opti"
+    # )
 
-    ax.plot(
-        aligned_slam.positions_xyz[:, 0],
-        aligned_slam.positions_xyz[:, 1],
-        aligned_slam.positions_xyz[:, 2],
-        label="Aligned SLAM"
-    )
+    # ax.plot(
+    #     aligned_slam.positions_xyz[:, 0],
+    #     aligned_slam.positions_xyz[:, 1],
+    #     aligned_slam.positions_xyz[:, 2],
+    #     label="Aligned SLAM"
+    # )
 
-    ax.plot(
-        aligned_live_slam.positions_xyz[:, 0],
-        aligned_live_slam.positions_xyz[:, 1],
-        aligned_live_slam.positions_xyz[:, 2],
-        label="Aligned Live SLAM"
-    )
+    # ax.plot(
+    #     aligned_live_slam.positions_xyz[:, 0],
+    #     aligned_live_slam.positions_xyz[:, 1],
+    #     aligned_live_slam.positions_xyz[:, 2],
+    #     label="Aligned Live SLAM"
+    # )
 
-    ax.legend()
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
+    # ax.legend()
+    # ax.set_xlabel("X")
+    # ax.set_ylabel("Y")
+    # ax.set_zlabel("Z")
 
-    plt.show()
+    # plt.show()
      ##
 
     # ------------------------------------------------------------

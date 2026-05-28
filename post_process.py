@@ -122,27 +122,12 @@ def prep_orbslam3_output(args, START, END, T, post_slam_data, live_slam_data=[],
 ### Just annotate
 def prep_annotate_slam_output(args, START, END, T, aligned_slam_data, mes_type, real_failures=None):
 
-    real_failures = real_failures[0]
 
     def identity(T_body_to_world): # Already in body frame.
         return T_body_to_world
-    print(aligned_slam_data.shape)
     # Aggregate is basically just for format conversion
     aligned_slam_body_poses, aligned_slam_body_velocities = aggregate_tracker(identity, np.array(aligned_slam_data))
     # Each pose is the IMU pose in the optitrack world frame.
-    print(aligned_slam_body_poses.shape)
-
-    fail_start_t = START + real_failures["start"] # Timestamp failure starts and we rely on IMU
-    new_map_start_t = START + real_failures["init_newmap"] # Timestamp that we start tracking a new map
-    relocalized_t = START + real_failures["end"] # Timestamp we end failure
-    imu_only_idxs = np.where( 
-        (new_map_start_t >= aligned_slam_body_poses[:,0]) & 
-        (aligned_slam_body_poses[:,0]>= fail_start_t)
-        )[0]
-    newmap_idxs = np.where( 
-        (relocalized_t >= aligned_slam_body_poses[:,0]) &
-        (aligned_slam_body_poses[:,0] >= new_map_start_t)
-        )[0]
 
     # Also do all of the labeling in here of tracking vs no tracking
 
@@ -157,11 +142,24 @@ def prep_annotate_slam_output(args, START, END, T, aligned_slam_data, mes_type, 
             }
         } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
     
-    # Apply tracking status labels
-    for i in range(len(aligned_live_slam_json)):
-        if i in imu_only_idxs: aligned_live_slam_json[i]["status"] = "imu"
-        elif i in newmap_idxs: aligned_live_slam_json[i]["status"] = "newmap"
-        else: aligned_live_slam_json[i]["status"] = "tracking"
+    if real_failures is not None: # Annotate failures if they're present
+        real_failures = real_failures[0]
+        fail_start_t = START + real_failures["start"] # Timestamp failure starts and we rely on IMU
+        new_map_start_t = START + real_failures["init_newmap"] # Timestamp that we start tracking a new map
+        relocalized_t = START + real_failures["end"] # Timestamp we end failure
+        imu_only_idxs = np.where( 
+            (new_map_start_t >= aligned_slam_body_poses[:,0]) & 
+            (aligned_slam_body_poses[:,0]>= fail_start_t)
+            )[0]
+        newmap_idxs = np.where( 
+            (relocalized_t >= aligned_slam_body_poses[:,0]) &
+            (aligned_slam_body_poses[:,0] >= new_map_start_t)
+            )[0]
+        # Apply tracking status labels
+        for i in range(len(aligned_live_slam_json)):
+            if i in imu_only_idxs: aligned_live_slam_json[i]["status"] = "imu"
+            elif i in newmap_idxs: aligned_live_slam_json[i]["status"] = "newmap"
+            else: aligned_live_slam_json[i]["status"] = "tracking"
 
     return aligned_live_slam_json
 
@@ -304,7 +302,6 @@ def post_process(args):
     ### Align SLAM trajectories to optitrack shared frame
     aligned_post_slam_json = []
     aligned_live_slam_json = []
-    # Get HTMs here
     body_post_slam_aligned_tum_traj = []
     body_live_slam_aligned_tum_traj = []
     if args.align:
@@ -344,6 +341,35 @@ def post_process(args):
             # and annotate live slam trajectory for use in plotting (aligned_live_slam_json) and evaluation (body_live_slam_aligned_tum_traj)
             aligned_live_slam_json, body_live_slam_aligned_tum_traj = prep_synth_fail_slam_output(args, START, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_live_slam_pose", synth_failures)
 
+        else:
+            print("No real or synthetic failures! Aligning regular-style")
+            body_post_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
+
+            def identity(T_body_to_world): # Already in body frame.
+                return T_body_to_world
+            # Aggregate is basically just for format conversion
+            aligned_post_slam_body_poses, aligned_post_slam_body_velocities = aggregate_tracker(identity, np.array(body_post_slam_aligned_tum_traj))
+            aligned_post_slam_json = [ {
+                    "t": float(body_pose[0]),
+                    "type": "aligned_slam_pose",
+                    "T_body_world" : body_pose[1:].reshape((4,4)),
+                    "v_world": {
+                            "vx": float(body_v[1]),
+                            "vy": float(body_v[2]),
+                            "vz": float(body_v[3])
+                    },
+                    "status": "tracking"
+                } for body_pose, body_v in zip( list(aligned_post_slam_body_poses), list(aligned_post_slam_body_velocities))]
+    
+            # Just make live slam a copy of post SLAM
+            body_live_slam_aligned_tum_traj = body_post_slam_aligned_tum_traj
+            aligned_live_slam_json = copy.deepcopy(aligned_post_slam_json)
+            for j in aligned_live_slam_json: j["type"] = "aligned_live_slam_pose"
+
+    # For testing a synthetic network delay before using each UWB range.
+    if args.synth_delay is not None:
+        for mes in uwb_json:
+            mes["t"] += args.synth_delay * 1e-3
 
 
     synth_uwb_json = []
@@ -434,6 +460,8 @@ if __name__ == "__main__":
     parser.add_argument("--multi_merge", action="store_true")
 
     parser.add_argument("--check_uwb_error", action="store_true")
+
+    parser.add_argument("--synth_delay", type=int)
 
     args = parser.parse_args()
 

@@ -124,6 +124,7 @@ def plot_trial(
 
     # Aligned SLAM will automatically overrule regular SLAM in plotting
     if len(aligned_slam_poses) > 0:
+        print("Overriding with aligned_slam_pose") # Ok so its just not reading in any aligned slam poses thats why plotting is defaulting to unlaigned
         slam_poses = aligned_slam_poses
         lost_slam_poses = lost_aligned_slam_poses
 
