@@ -87,7 +87,7 @@ import copy
 
 
 # Returns evenly spaced ranges
-def range_synthesizer2(START, END, body_traj, T, outpath, f_uwb=5/4.0, std=0.01):
+def range_synthesizer2(START, END, body_traj, T, outpath, f_uwb=5, std=0.01):
     anchors = {
             1: [2, 0.5, 3],
             3: [-6, 2, 2],
@@ -367,6 +367,11 @@ def range_synthesizer3( multi_all, anchors, gt_trajectories, T, std):
     mobile_nodes = [2,3,4]
     # First transform body_traj to uwb_rx_traj
 
+    rs = [j["range"] for j in multi_all if j["type"] == "uwb"]
+    print(f"{rs[:5]=}")
+
+
+
     for id in mobile_nodes: # For each user
         for j in multi_all:
             if j["src"] == id and j["type"] == "uwb": # Find all ranges that belong to that user, and convert them to synthetic.
@@ -388,9 +393,9 @@ def range_synthesizer3( multi_all, anchors, gt_trajectories, T, std):
                     T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
                     other_tx_position = T_decawave_to_world[:3,3]
 
-                    synth_range = np.random.normal(loc=np.linalg.norm(tx_position -  other_tx_position), scale=std)
+                    # synth_range = np.random.normal(loc=np.linalg.norm(tx_position -  other_tx_position), scale=std)
+                    synth_range = np.linalg.norm(tx_position -  other_tx_position)
 
-                    print(f"{synth_range=} vs {j["range"]=}")
                     j["range"] = synth_range
 
 
@@ -412,8 +417,13 @@ def range_synthesizer3( multi_all, anchors, gt_trajectories, T, std):
                     source_position = T_decawave_to_world[:3,3] # Physical antenna position in world frame
                     # source_position = np.linalg.inv(T_world_to_body)[:3,3]# body position in world frame (if just using RangeFactor)
 
-                    synth_range = np.random.normal(loc=np.linalg.norm(source_position -  dest_position), scale=std)
+                    # synth_range = np.random.normal(loc=np.linalg.norm(source_position -  dest_position), scale=std)
+                    synth_range = np.linalg.norm(source_position -  dest_position)
+
                     j["range"] = synth_range
+
+    rs = [j["range"] for j in multi_all if j["type"] == "uwb"]
+    print(f"{rs[:5]=}")
 
     return multi_all
 

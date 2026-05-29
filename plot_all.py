@@ -197,6 +197,9 @@ def plot_trial(
     # ------------------------------
     # Plot estimates (optional)
     # ------------------------------
+# ------------------------------
+# Plot estimates (optional)
+# ------------------------------
     if est_path is not None:
         try:
             with open(est_path, "r") as f:
@@ -214,6 +217,7 @@ def plot_trial(
                     )
 
             if len(est_poses) > 0 and est_stride != DONT_PLOT:
+
                 positions_world = np.array([
                     np.linalg.inv(p)[:3, 3]
                     for p in est_poses
@@ -230,10 +234,21 @@ def plot_trial(
 
                 if est_stride > 0:
                     for i in range(0, len(est_poses), est_stride):
+
                         draw_axes(ax, est_poses[i], length=0.4)
 
+                        # Add pose index text
+                        pos = np.linalg.inv(est_poses[i])[:3, 3]
+
+                        # ax.text(
+                        #     pos[0],
+                        #     pos[1],
+                        #     pos[2],
+                        #     str(i),
+                        #     fontsize=8
+                        # )
         except Exception as e:
-            print(f"Estimate plotting failed: {e}")
+            print(f"Failed to load estimates: {e}")
 
     # ------------------------------
     # Anchors

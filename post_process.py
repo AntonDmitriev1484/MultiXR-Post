@@ -366,13 +366,68 @@ def post_process(args):
             aligned_live_slam_json = copy.deepcopy(aligned_post_slam_json)
             for j in aligned_live_slam_json: j["type"] = "aligned_live_slam_pose"
 
+    ### Apply sensitivity analysis operations
+
     # For testing a synthetic network delay before using each UWB range.
     if args.synth_delay is not None:
         for mes in uwb_json:
             mes["t"] += args.synth_delay * 1e-3
 
+    if args.median_filter:
+        """
+        HOW IT WORKS:
+        Each output sample is the median of a symmetric window of 2w+1 raw samples
+        centered on the current sample. The median is immune to up to w outliers
+        within the window. No detection step — the median itself is both the
+        detector and the replacement.
+
+        REPLACEMENT:
+        The median of the local window replaces every sample,
+        including clean ones (slight smoothing of the true signal).
+
+        PARAMETERS:
+        w : half-window size. w=5 → 11-sample window.
+            Larger w → more robust to long NLoS bursts, more lag.
+        """
+        def moving_median(x, w=5):
+            x = np.asarray(x, float)
+            n = len(x)
+            y = x.copy()
+            h = w // 2
+
+            for i in range(n):
+                y[i] = np.median(x[max(0, i-h):min(n, i+h+1)])
+
+            return y
+        
+        # Sweep median filter over all range measurements
+        # NOTE I'M FILTERING OVER ALL OF THE RANGES, NOT INDIVIDUALLY BETWEEN EACH USER PAIR
+
+        for id in [1,2,3,4,5]:
+            all_mes = [j for j in uwb_json if j["id"]==id]
+            x = np.array([j["range"] for j in all_mes])
+            x_new = moving_median(x) # Apply filter
+            for i, mes in enumerate(all_mes): mes["range"] = x_new[i] # Update references
+        
+        # plt.figure()
+
+        # plt.plot(x, label="Raw Range")
+        # plt.plot(x_new, label="Median Filtered")
+
+        # plt.xlabel("Range Index")
+        # plt.ylabel("Distance")
+        # plt.title("UWB Range vs Median Filtered Range")
+
+        # plt.legend()
+        # plt.grid(True)
+
+        # plt.show()
+        
+
 
     synth_uwb_json = []
+    # if args.id == 4:
+        # synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, f"/home/antond2/Desktop/Research/MultiXR-Post/merged/{args.trial_name}_merged")
     
     # Compose the final factor graph dataset
     all_data = uwb_json + imu_json + opti_json + post_slam_json + synth_uwb_json + aligned_post_slam_json + aligned_live_slam_json
@@ -463,6 +518,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--synth_delay", type=int)
 
+    parser.add_argument("--median_filter", action="store_true")
+
     args = parser.parse_args()
 
     if args.multi_merge:
@@ -501,6 +558,7 @@ if __name__ == "__main__":
         merged_all += mirrored_uwb           
 
         # Synthetsize ranges in place of real ones.
+        # merged_all = range_synthesizer3(merged_all, anchor_positions, gt_trajectories, T, std=0.01)
 
         merged_all = sorted(merged_all, key=lambda x: x["t"])
         json.dump(merged_all, open(outpath+"/all.json", 'w'), cls=NumpyEncoder, indent=1)
