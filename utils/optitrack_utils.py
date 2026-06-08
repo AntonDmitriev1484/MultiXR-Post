@@ -120,7 +120,7 @@ def clean_opti(opti_data):
     opti_data = data
     return opti_data
 
-# Clean and return position of each anchors UWB transmitter in the optitrack world frame
+# # Clean and return position of each anchors UWB transmitter in the optitrack world frame
 def compute_anchors(opti_anchor_trajectories, T_optiuwb_to_uwbtx):
     anchor_positions = []
 

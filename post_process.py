@@ -130,19 +130,28 @@ def prep_annotate_slam_output(args, START, END, T, aligned_slam_data, mes_type, 
     # Each pose is the IMU pose in the optitrack world frame.
 
     # Also do all of the labeling in here of tracking vs no tracking
+            # If we passed a valid frequency to subsample to
+    slam_freq = len(aligned_slam_data) / (END-START)
+    if slam_freq > args.slam > 0:
+        skip = math.ceil(slam_freq / args.slam) # Number of poses to skip in subsampling to synth slam frequency
+        aligned_slam_body_poses = np.array(aligned_slam_body_poses)
+        aligned_slam_body_poses = aligned_slam_body_poses[::skip] # Finally, subsample to required frequency
+    
 
     aligned_live_slam_json = [ {
             "t": float(body_pose[0]),
             "type": mes_type,
             "T_body_world" : body_pose[1:].reshape((4,4)),
             "v_world": {
-                    "vx": float(body_v[1]),
-                    "vy": float(body_v[2]),
-                    "vz": float(body_v[3])
+                    "vx": 0,
+                    "vy": 0,
+                    "vz": 0
             }
         } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
     
-    if real_failures is not None: # Annotate failures if they're present
+
+    
+    if real_failures is not None and len(real_failures) > 0: # Annotate failures if they're present
         real_failures = real_failures[0]
         fail_start_t = START + real_failures["start"] # Timestamp failure starts and we rely on IMU
         new_map_start_t = START + real_failures["init_newmap"] # Timestamp that we start tracking a new map
@@ -160,7 +169,9 @@ def prep_annotate_slam_output(args, START, END, T, aligned_slam_data, mes_type, 
             if i in imu_only_idxs: aligned_live_slam_json[i]["status"] = "imu"
             elif i in newmap_idxs: aligned_live_slam_json[i]["status"] = "newmap"
             else: aligned_live_slam_json[i]["status"] = "tracking"
-
+    else: 
+        for i in range(len(aligned_live_slam_json)): aligned_live_slam_json[i]["status"] = "tracking"
+        
     return aligned_live_slam_json
 
 ### Annotate and transform
@@ -171,14 +182,16 @@ def prep_synth_fail_slam_output(args, START, END, T, aligned_slam_data, mes_type
     # Aggregate is basically just for format conversion
     aligned_slam_body_poses, aligned_slam_body_velocities = aggregate_tracker(identity, np.array(aligned_slam_data))
 
-    imu_only_idx = []
+    imu_only_idxs = []
     newmap_idxs = []
-    if synth_failures is not None:
+    if synth_failures is not None and len(synth_failures) > 0:
 
         synth_failures = synth_failures[0] # For now just assuming 1 failure
         fail_start_t = START + synth_failures["start"] # Timestamp failure starts and we rely on IMU
         new_map_start_t = START + synth_failures["init_newmap"] # Timestamp that we start tracking a new map
         relocalized_t = START + synth_failures["end"] # Timestamp we end failure
+
+        print(f" {fail_start_t} {new_map_start_t} {relocalized_t}")
 
         imu_only_idxs = np.where( (new_map_start_t >= aligned_slam_body_poses[:,0]) & (aligned_slam_body_poses[:,0]>= fail_start_t))[0]
         newmap_idxs = np.where( (relocalized_t >= aligned_slam_body_poses[:,0]) & (aligned_slam_body_poses[:,0] >= new_map_start_t))[0]
@@ -199,9 +212,9 @@ def prep_synth_fail_slam_output(args, START, END, T, aligned_slam_data, mes_type
             "type": mes_type,
             "T_body_world" : body_pose[1:].reshape((4,4)),
             "v_world": {
-                    "vx": float(body_v[1]),
-                    "vy": float(body_v[2]),
-                    "vz": float(body_v[3])
+                    "vx": 0,
+                    "vy": 0,
+                    "vz": 0
             }
         } for body_pose, body_v in zip( list(aligned_slam_body_poses), list(aligned_slam_body_velocities))]
     
@@ -211,41 +224,54 @@ def prep_synth_fail_slam_output(args, START, END, T, aligned_slam_data, mes_type
         elif i in newmap_idxs: aligned_post_slam_json[i]["status"] = "newmap"
         else: aligned_post_slam_json[i]["status"] = "tracking"
 
-    body_slam_aligned_tum_traj = [HTM_to_TUM(p) for p in aligned_slam_body_poses]
+    body_slam_aligned_tum_traj = [slam_HTM_to_TUM(p) for p in aligned_slam_body_poses]
 
     return aligned_post_slam_json, body_slam_aligned_tum_traj
 
 def post_process(args):
 
+    ROOT = "/home/antond2/Desktop/Research/MultiXR-Post"
+
     ID = args.id
-    outpath = f'./{ID}/post/{args.trial_name}_post'
-    out_world = outpath+f'/world/' # Vicon can define apriltags and anchors set up in world frame
+
+    outpath = f"{ROOT}/{ID}/post/{args.trial_name}_post"
+    out_world = f"{outpath}/world/"  # Vicon can define apriltags and anchors set up in world frame
     os.makedirs(outpath, exist_ok=True)
     os.makedirs(out_world, exist_ok=True)
 
     in_slam = ""
     post_slam_data = []
-    in_real_fails = f'./real_fails/'
-    real_failures = f"{args.trial_name}_nuc{args.id}_slam_cam_traj.csv" in os.listdir(in_real_fails)
+
+    in_real_fails = f"{ROOT}/real_fails/"
+    real_failures = (
+        f"{args.trial_name}_nuc{args.id}_slam_cam_traj.csv"
+        in os.listdir(in_real_fails)
+    )
 
     # SLAM 'save_traj' trajectory
-    in_slam = f'./{ID}/orbslam/out/{args.trial_name}_nuc{ID}_raw_cam_traj.txt'
+    in_slam = (
+        f"{ROOT}/{ID}/orbslam/out/"
+        f"{args.trial_name}_nuc{ID}_raw_cam_traj.txt"
+    )
     post_slam_data = np.loadtxt(in_slam)
 
     # SLAM 'ros1 bag trajectory'
     live_slam_data = []
     if real_failures:
-        print("REAL SLAM FAILURE CASE, reading live trajectory frp ros1 bag csv")
-        live_slam_data = parse_ros1_bag_csv(f'./real_fails/{args.trial_name}_nuc{args.id}_slam_cam_traj.csv')
+        print("REAL SLAM FAILURE CASE, reading live trajectory from ros1 bag csv")
+        live_slam_data = parse_ros1_bag_csv(
+            f"{ROOT}/real_fails/{args.trial_name}_nuc{args.id}_slam_cam_traj.csv"
+        )
 
-    inpath = f'./{ID}/collect/{args.trial_name}_nuc{ID}_raw'
-    in_kalibr_dir = inpath+f"/calibration/"
+    inpath = f"{ROOT}/{ID}/collect/{args.trial_name}_nuc{ID}_raw"
+
+    in_kalibr_dir = f"{inpath}/calibration/"
     kalibr_files = list(Path(in_kalibr_dir).glob("*.yaml"))
     in_kalibr = f"{kalibr_files[0]}"
 
-    imu_json = json.load(open(inpath+'/imu_raw.json', 'r'))
-    uwb_json = json.load(open(inpath+'/uwb_raw.json', 'r'))
-    metadata = json.load(open(inpath+'/meta.json', 'r'))
+    imu_json = json.load(open(f"{inpath}/imu_raw.json", "r"))
+    uwb_json = json.load(open(f"{inpath}/uwb_raw.json", "r"))
+    metadata = json.load(open(f"{inpath}/meta.json", "r"))
 
 
     # # Filter for messages within bag timestamp range.
@@ -334,12 +360,15 @@ def post_process(args):
 
             body_post_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
 
+            all_data_start_ts = metadata["start_ns"] * 1e-9
+            # fail_end_ts = synth_failures[0]["end"] + all_data_start_ts      
+
             # annotate the post slam trajectory, for use in the graph
-            aligned_post_slam_json = prep_annotate_slam_output(args, START, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_slam_pose", synth_failures)
+            aligned_post_slam_json = prep_annotate_slam_output(args, all_data_start_ts, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_slam_pose", synth_failures)
 
             # add newmap deformation and IMU segment, 
             # and annotate live slam trajectory for use in plotting (aligned_live_slam_json) and evaluation (body_live_slam_aligned_tum_traj)
-            aligned_live_slam_json, body_live_slam_aligned_tum_traj = prep_synth_fail_slam_output(args, START, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_live_slam_pose", synth_failures)
+            aligned_live_slam_json, body_live_slam_aligned_tum_traj = prep_synth_fail_slam_output(args, all_data_start_ts, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_live_slam_pose", synth_failures)
 
         else:
             print("No real or synthetic failures! Aligning regular-style")
@@ -349,14 +378,22 @@ def post_process(args):
                 return T_body_to_world
             # Aggregate is basically just for format conversion
             aligned_post_slam_body_poses, aligned_post_slam_body_velocities = aggregate_tracker(identity, np.array(body_post_slam_aligned_tum_traj))
+            
+                        # If we passed a valid frequency to subsample to
+            slam_freq = len(aligned_post_slam_body_poses) / (END-START)
+            if slam_freq > args.slam > 0:
+                skip = math.ceil(slam_freq / args.slam) # Number of poses to skip in subsampling to synth slam frequency
+                aligned_post_slam_body_poses = np.array(aligned_post_slam_body_poses)
+                aligned_post_slam_body_poses = aligned_post_slam_body_poses[::skip] # Finally, subsample to required frequency
+            
             aligned_post_slam_json = [ {
                     "t": float(body_pose[0]),
                     "type": "aligned_slam_pose",
                     "T_body_world" : body_pose[1:].reshape((4,4)),
                     "v_world": {
-                            "vx": float(body_v[1]),
-                            "vy": float(body_v[2]),
-                            "vz": float(body_v[3])
+                        "vx": 0,
+                        "vy": 0,
+                        "vz": 0
                     },
                     "status": "tracking"
                 } for body_pose, body_v in zip( list(aligned_post_slam_body_poses), list(aligned_post_slam_body_velocities))]
@@ -400,30 +437,104 @@ def post_process(args):
 
             return y
         
-        # Sweep median filter over all range measurements
-        # NOTE I'M FILTERING OVER ALL OF THE RANGES, NOT INDIVIDUALLY BETWEEN EACH USER PAIR
-
         for id in [1,2,3,4,5]:
             all_mes = [j for j in uwb_json if j["id"]==id]
             x = np.array([j["range"] for j in all_mes])
             x_new = moving_median(x) # Apply filter
             for i, mes in enumerate(all_mes): mes["range"] = x_new[i] # Update references
+
+    if args.cfar_filter:
+
+        import cfar
+        from collections import defaultdict
+
+        def apply_cfar_to_uwb(raw_json, k=2.0, method="CA-CFAR"):
+            """
+            Runs CFAR per (src, id) group and overwrites range in-place.
+            """
+
+            # pick CFAR function
+            fn = cfar.CFAR_VARIANTS[method]
+
+            # group indices into sequences
+            groups = defaultdict(list)
+            for i, r in enumerate(raw_json):
+                if r.get("type") != "uwb":
+                    continue
+                groups[(args.id, r["id"])].append(i)
+
+            for key, idxs in groups.items():
+                idxs = sorted(idxs, key=lambda i: raw_json[i]["t"])
+
+                t = np.array([raw_json[i]["t"] for i in idxs])
+                x = np.array([raw_json[i]["range"] for i in idxs])
+
+                # run CFAR
+                result = fn(t, x, k=k)
+
+                # CFAR returns (reject_mask, threshold)
+                if isinstance(result, tuple):
+                    reject = result[0]
+                else:
+                    reject = result
+
+                # interpolate cleaned signal
+                x_new = cfar.interp_accepted(t, x, reject)
+
+                # overwrite original JSON entries
+                for j, i in enumerate(idxs):
+                    raw_json[i]["range"] = float(x_new[j])
+
+            return raw_json
         
-        # plt.figure()
+        uwb_json = apply_cfar_to_uwb(uwb_json)
 
-        # plt.plot(x, label="Raw Range")
-        # plt.plot(x_new, label="Median Filtered")
+    if args.dw_cfar_filter:
+        import dw_cfar
+        from collections import defaultdict
 
-        # plt.xlabel("Range Index")
-        # plt.ylabel("Distance")
-        # plt.title("UWB Range vs Median Filtered Range")
 
-        # plt.legend()
-        # plt.grid(True)
+        def apply_dw_cfar_to_uwb(raw_json, src_id, k=2.0):
+            """
+            Runs the DW+CFAR hybrid filter and overwrites ranges in-place.
+            """
 
-        # plt.show()
-        
+            groups = defaultdict(list)
 
+            for i, r in enumerate(raw_json):
+                if r.get("type") != "uwb":
+                    continue
+
+                groups[(src_id, r["id"])].append(i)
+
+            for _, idxs in groups.items():
+
+                idxs = sorted(idxs, key=lambda i: raw_json[i]["t"])
+
+                t = np.array([raw_json[i]["t"] for i in idxs])
+                x = np.array([raw_json[i]["range"] for i in idxs])
+
+                recs = [raw_json[i] for i in idxs]
+
+                reject, _, _, _, _, _, _ = dw_cfar.dw_cfar_detector(
+                    t,
+                    x,
+                    recs,
+                    k
+                )
+
+                x_new = dw_cfar.interp_accepted(t, x, reject)
+
+                for j, i in enumerate(idxs):
+                    raw_json[i]["range"] = float(x_new[j])
+
+            return raw_json
+
+        uwb_json = apply_dw_cfar_to_uwb(
+            uwb_json,
+            src_id=args.id,
+            k=1.5
+        )
 
     synth_uwb_json = []
     # if args.id == 4:
@@ -435,7 +546,7 @@ def post_process(args):
 
 
     ### Hard coding things for evaluation
-    # Remove Node 2 from being used in multi2_board_loss3, it has un-controlled tracking loss.
+    # # Remove Node 2 from being used in multi2_board_loss3, it has un-controlled tracking loss.
     if args.trial_name == "multi2_board_loss3":
         for j in all_data:
             if j["src"] == 2:
@@ -518,7 +629,13 @@ if __name__ == "__main__":
 
     parser.add_argument("--synth_delay", type=int)
 
+    parser.add_argument("--synth_rate", type=int)
+
     parser.add_argument("--median_filter", action="store_true")
+
+    parser.add_argument("--cfar_filter", action="store_true")
+
+    parser.add_argument("--dw_cfar_filter", action="store_true")
 
     args = parser.parse_args()
 
@@ -559,6 +676,25 @@ if __name__ == "__main__":
 
         # Synthetsize ranges in place of real ones.
         # merged_all = range_synthesizer3(merged_all, anchor_positions, gt_trajectories, T, std=0.01)
+        if args.synth_rate:
+            merged_all = range_synthesizer4(merged_all, anchor_positions, gt_trajectories, T, std=0.2, rate=args.synth_rate)
+            # Checking new frequency
+            for u in [2,3,4]:
+                uwb_json = [j for j in merged_all if j["type"] == "uwb" and j["id"]==u]
+                print(f" Measured Synth Rate UWB frequency {len(uwb_json) / (merged_all[-1]["t"]-merged_all[0]["t"])}")
+
+        # Adjust for ?anchor coordinate frame error? on 1 and 5
+        # In multi2, multi3, and opti_multi1
+        # anchor_err_trial = False
+        for t in ["multi2", "multi3", "opti_multi1"]: 
+            if t in args.trial_name: 
+                anchor_err_trial = True
+                break
+        if anchor_err_trial:
+            # Remove constant positive offset off nodes
+            for u in merged_all:
+                if u["type"] == "uwb" and u["id"] == 1: u["range"] -= 0.16
+                if u["type"] == "uwb" and u["id"] == 5: u["range"] -= 0.17
 
         merged_all = sorted(merged_all, key=lambda x: x["t"])
         json.dump(merged_all, open(outpath+"/all.json", 'w'), cls=NumpyEncoder, indent=1)

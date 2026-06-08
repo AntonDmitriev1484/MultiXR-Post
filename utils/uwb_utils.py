@@ -427,3 +427,183 @@ def range_synthesizer3( multi_all, anchors, gt_trajectories, T, std):
 
     return multi_all
 
+
+from copy import deepcopy
+import numpy as np
+
+
+from copy import deepcopy
+import numpy as np
+
+
+# Input trajectories are T_world_to_body, we need T_body_to_world
+def range_synthesizer4(
+    multi_all,
+    anchors,
+    gt_trajectories,
+    T,
+    std=0.2,
+    rate=10,
+):
+
+    mobile_nodes = [2, 3, 4]
+
+    def compute_range(src, dst, t):
+
+        body_traj = np.array(gt_trajectories[src - 2])
+
+        idx = np.argmin(np.abs(body_traj[:, 0] - t))
+
+        T_world_to_body_tum = body_traj[idx]
+        T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+
+        T_decawave_to_world = (
+            np.linalg.inv(T_world_to_body)
+            @ np.linalg.inv(T.T_body_to_decawave)
+        )
+
+        src_pos = T_decawave_to_world[:3, 3]
+
+        # Mobile -> Mobile
+        if dst in mobile_nodes:
+
+            other_body_traj = np.array(
+                gt_trajectories[dst - 2]
+            )
+
+            idx = np.argmin(
+                np.abs(other_body_traj[:, 0] - t)
+            )
+
+            T_world_to_body_tum = other_body_traj[idx]
+            T_world_to_body = slam_quat_to_HTM(
+                T_world_to_body_tum
+            )
+
+            T_decawave_to_world = (
+                np.linalg.inv(T_world_to_body)
+                @ np.linalg.inv(T.T_body_to_decawave)
+            )
+
+            dst_pos = T_decawave_to_world[:3, 3]
+
+        # Mobile -> Anchor
+        else:
+
+            dst_pos = np.array(
+                [
+                    x["position"]
+                    for x in anchors
+                    if x["ID"] == dst
+                ][0]
+            )
+
+        true_range = np.linalg.norm(
+            src_pos - dst_pos
+        )
+
+        return np.random.normal(
+            true_range,
+            std
+        )
+
+    #
+    # Gather all existing UWB links
+    #
+    src_groups = {}
+
+    for msg in multi_all:
+
+        if msg.get("type") != "uwb":
+            continue
+
+        if msg["src"] not in mobile_nodes:
+            continue
+
+        src_groups.setdefault(msg["src"], {})
+        src_groups[msg["src"]].setdefault(
+            msg["id"],
+            []
+        )
+        src_groups[msg["src"]][msg["id"]].append(msg)
+
+    #
+    # Keep non-UWB messages
+    #
+    output = [
+        m
+        for m in multi_all
+        if m.get("type") != "uwb"
+    ]
+
+    #
+    # Generate synthetic schedule
+    #
+    dt = 1.0 / rate
+
+    for src, dst_groups in src_groups.items():
+
+        #
+        # Determine overall time span
+        #
+        all_msgs = []
+
+        for msgs in dst_groups.values():
+            all_msgs.extend(msgs)
+
+        all_msgs.sort(key=lambda x: x["t"])
+
+        if len(all_msgs) == 0:
+            continue
+
+        start_t = all_msgs[0]["t"]
+        end_t = all_msgs[-1]["t"]
+
+        #
+        # Destinations this source can range to
+        #
+        dst_ids = sorted(dst_groups.keys())
+
+        #
+        # Use first measurement on each link
+        # as a template
+        #
+        templates = {
+            dst: deepcopy(dst_groups[dst][0])
+            for dst in dst_ids
+        }
+
+        desired_times = np.arange(
+            start_t,
+            end_t,
+            dt
+        )
+
+        #
+        # Round-robin schedule
+        #
+        for k, t in enumerate(desired_times):
+
+            dst = dst_ids[
+                k % len(dst_ids)
+            ]
+
+            msg = deepcopy(
+                templates[dst]
+            )
+
+            msg["t"] = float(t)
+
+            msg["range"] = compute_range(
+                src,
+                dst,
+                t
+            )
+
+            output.append(msg)
+
+    output.sort(
+        key=lambda x: x.get("t", 0.0)
+    )
+
+    return output
