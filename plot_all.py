@@ -90,6 +90,8 @@ def plot_trial(
     opti_path = all_json_path
     slam_path = all_json_path
     est_path = ""
+    anchor_optimization_path = ""
+    final_anchor_estimate_path = ""
 
     # Preserve function argument unless overridden
     # est_path already came from the function parameter
@@ -101,6 +103,12 @@ def plot_trial(
 
         if hasattr(paths, "est_path") and paths.est_path is not None:
             est_path = paths.est_path
+        
+        if hasattr(paths, "anchor_optimization_path") and paths.anchor_optimization_path is not None:
+            anchor_optimization_path = paths.anchor_optimization_path
+        
+        if hasattr(paths, "final_anchor_estimate_path") and paths.final_anchor_estimate_path is not None:
+            final_anchor_estimate_path = paths.final_anchor_estimate_path
 
     # ------------------------------
     # Load required data
@@ -255,24 +263,24 @@ def plot_trial(
     if est_path is not None:
         try:
             with open(est_path, "r") as f:
-                est_data = json.load(f)
+                anchor_traj_data = json.load(f)
 
-            est_poses = []
+            anchor_poses = []
 
-            for item in est_data:
+            for item in anchor_traj_data:
                 if (
                     item.get("type") == "est_pose"
                     and "T_body_world" in item
                 ):
-                    est_poses.append(
+                    anchor_poses.append(
                         np.array(item["T_body_world"])
                     )
 
-            if len(est_poses) > 0 and est_stride != DONT_PLOT:
+            if len(anchor_poses) > 0 and est_stride != DONT_PLOT:
 
                 positions_world = np.array([
                     np.linalg.inv(p)[:3, 3]
-                    for p in est_poses
+                    for p in anchor_poses
                 ])
 
                 ax.plot(
@@ -284,12 +292,12 @@ def plot_trial(
                 )
 
                 if est_stride > 0:
-                    for i in range(0, len(est_poses), est_stride):
+                    for i in range(0, len(anchor_poses), est_stride):
 
-                        draw_axes(ax, est_poses[i], length=0.4)
+                        draw_axes(ax, anchor_poses[i], length=0.4)
 
                         # Add pose index text
-                        pos = np.linalg.inv(est_poses[i])[:3, 3]
+                        pos = np.linalg.inv(anchor_poses[i])[:3, 3]
 
                         # ax.text(
                         #     pos[0],
@@ -312,9 +320,69 @@ def plot_trial(
             for d in anchor_data:
                 pos = d["position"]
 
-                ax.scatter(pos[0], pos[1], pos[2], color=COLORS["est"])
+                ax.scatter(pos[0], pos[1], pos[2], color=COLORS["recovered"])
                 ax.text(pos[0], pos[1], pos[2], d["ID"])
 
+        except Exception as e:
+            print(f"Anchor plotting failed: {e}")
+
+
+    # ------------------------------
+    # Plot estimated anchor trajectory
+    # ------------------------------
+    if anchor_optimization_path is not None:
+        try:
+            with open(anchor_optimization_path, "r") as f:
+                anchor_traj_data = json.load(f)
+
+            anchor_poses = []
+
+            for item in anchor_traj_data:
+                if (
+                    item.get("type") == "est_pose"
+                    and "T_body_world" in item
+                ):
+                    anchor_poses.append(
+                        np.array(item["T_body_world"])
+                    )
+
+            if len(anchor_poses) > 0 and est_stride != DONT_PLOT:
+
+                positions_world = np.array([
+                    np.linalg.inv(p)[:3, 3]
+                    for p in anchor_poses
+                ])
+
+                ax.plot(
+                    positions_world[:, 0],
+                    positions_world[:, 1],
+                    positions_world[:, 2],
+                    label=label_text,
+                    color=COLORS["est"]
+                )
+
+                if est_stride > 0:
+                    for i in range(0, len(anchor_poses), est_stride):
+
+                        draw_axes(ax, anchor_poses[i], length=0.4)
+
+                        # Add pose index text
+                        pos = np.linalg.inv(anchor_poses[i])[:3, 3]
+
+        except Exception as e:
+            print(f"Failed to load estimates: {e}")
+
+    # ------------------------------
+    # Plot final estimated positions
+    # ------------------------------
+    if not (final_anchor_estimate_path == ""):
+        try:
+            with open(final_anchor_estimate_path, "r") as f:
+                anchor_data = json.load(f)
+            for d in anchor_data:
+                pos = d["position"]
+                ax.scatter(pos[0], pos[1], pos[2], color=COLORS["est"])
+                ax.text(pos[0], pos[1], pos[2], d["ID"])
         except Exception as e:
             print(f"Anchor plotting failed: {e}")
 
@@ -329,7 +397,7 @@ def plot_trial(
     ax.set_ylim(-2.5, 4)
     ax.set_zlim(-2, 2)
 
-    # ax.set_title(f"NUC{id} {trial_name}")
+    ax.set_title(f"NUC{id} {trial_name}")
     # Filter ablation study
     # ax.set_title(f"User Trajectory\nLow-Pass Filter Enabled, UWB Filter Disabled")
     # ax.set_title(f"User Trajectory\nLow-Pass Filter Enabled, UWB Filter Enabled")
@@ -338,7 +406,7 @@ def plot_trial(
 
     # Example trials
     # ax.set_title(f"Following Another User")
-    ax.set_title(f"Tripping")
+    # ax.set_title(f"Tripping")
     
     ax.view_init(elev=45, azim=45)
     ax.legend()

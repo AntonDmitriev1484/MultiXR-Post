@@ -622,19 +622,11 @@ if __name__ == "__main__":
     parser.add_argument("--align", "-a", action="store_true")
     # Load a json file containing tracking lost segments
     parser.add_argument("--synth_failures", "-f", action="store_true")
-
     parser.add_argument("--multi_merge", action="store_true")
-
     parser.add_argument("--check_uwb_error", action="store_true")
-
     parser.add_argument("--synth_delay", type=int)
-
-    parser.add_argument("--synth_rate", type=int)
-
     parser.add_argument("--median_filter", action="store_true")
-
     parser.add_argument("--cfar_filter", action="store_true")
-
     parser.add_argument("--dw_cfar_filter", action="store_true")
 
     args = parser.parse_args()
@@ -664,24 +656,15 @@ if __name__ == "__main__":
         # Mirror UWB ranges. This is something the Beluga firmware could report, but doesn't.
         # It only logs range on the report, not on the final, this means the responder compute the range, but never logs it.
         # This will effectively double our ranges.
-        mirrored_uwb = []
-        for j in merged_all:
-            if j["type"] == "uwb":
-                j_ = copy.deepcopy(j)
-                temp_src = j["src"]
-                j_["src"] = j["id"]
-                j_["id"] = temp_src
-                mirrored_uwb.append(j_)
-        merged_all += mirrored_uwb           
-
-        # Synthetsize ranges in place of real ones.
-        # merged_all = range_synthesizer3(merged_all, anchor_positions, gt_trajectories, T, std=0.01)
-        if args.synth_rate:
-            merged_all = range_synthesizer4(merged_all, anchor_positions, gt_trajectories, T, std=0.2, rate=args.synth_rate)
-            # Checking new frequency
-            for u in [2,3,4]:
-                uwb_json = [j for j in merged_all if j["type"] == "uwb" and j["id"]==u]
-                print(f" Measured Synth Rate UWB frequency {len(uwb_json) / (merged_all[-1]["t"]-merged_all[0]["t"])}")
+        # mirrored_uwb = []
+        # for j in merged_all:
+        #     if j["type"] == "uwb":
+        #         j_ = copy.deepcopy(j)
+        #         temp_src = j["src"]
+        #         j_["src"] = j["id"]
+        #         j_["id"] = temp_src
+        #         mirrored_uwb.append(j_)
+        # merged_all += mirrored_uwb           
 
         # Adjust for ?anchor coordinate frame error? on 1 and 5
         # In multi2, multi3, and opti_multi1
