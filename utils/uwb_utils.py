@@ -428,182 +428,76 @@ def range_synthesizer3( multi_all, anchors, gt_trajectories, T, std):
     return multi_all
 
 
-from copy import deepcopy
-import numpy as np
+# For each range timestamp to a mobile node, take the most recent optitrack pose, and add a synthetic direct range to anchor 1 or 5
+# This roughly models gossip giving us a range constraint to an anchor, on ranges to non-anchor nodes.
+
+# # Input trajectories are T_world_to_body we need T_body_world
+def range_synthesizer4( multi_all, anchors, gt_trajectories, T, std):
+
+    print(anchors)
+
+    # Replace all real ranges with synthetic.
+
+    mobile_nodes = [2,3,4]
+    stationary_nodes = [1,5]
+    # First transform body_traj to uwb_rx_traj
+
+    range_counter = 0
+
+    synth_ranges = []
+
+    for id in mobile_nodes: # For each user
+        for j in multi_all:
+            if j["src"] == id and j["type"] == "uwb": # Find all ranges that belong to that user, and convert them to synthetic.
+                if j["id"] in mobile_nodes: # For all user - > user ranges
+                    # Keep the original range
+                    # And create an extra synthetic range to an anchor
+                    
+                    body_traj = np.array(gt_trajectories[j["src"]-2])
+
+                    idx = np.argmin(np.abs(body_traj[:, 0] - j["t"]))
+                    T_world_to_body_tum = body_traj[idx]
+                    T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
+                    T_decawave_to_world = np.linalg.inv(T_world_to_body) @ np.linalg.inv(T.T_body_to_decawave) # compute tag decawave_to_world from body_to_world pose
+                    tx_position = T_decawave_to_world[:3,3]
 
 
-from copy import deepcopy
-import numpy as np
+                    dest_position = anchors[range_counter % len(anchors)]['position']
+                    dest_id = anchors[range_counter % len(anchors)]['ID']
 
+                    synth_range = np.random.normal(loc=np.linalg.norm(tx_position -  dest_position), scale=std)
+                    # synth_range = np.linalg.norm(tx_position -  dest_position)
 
-# Input trajectories are T_world_to_body, we need T_body_to_world
-def range_synthesizer4(
-    multi_all,
-    anchors,
-    gt_trajectories,
-    T,
-    std=0.2,
-    rate=10,
-):
+                    j_synth = copy.copy(j)
+                    j_synth["range"] = synth_range
+                    j_synth["id"] = dest_id
+                    j_synth["tag"] = "synth_for_anchor_selfloc"
+                    synth_ranges.append(j_synth)
 
-    mobile_nodes = [2, 3, 4]
+                    range_counter += 1
 
-    def compute_range(src, dst, t):
+    return synth_ranges
 
-        body_traj = np.array(gt_trajectories[src - 2])
+def embed_poses_in_ranges( multi_all, anchors, gt_trajectories):
+    mobile_nodes = [2,3,4]
 
-        idx = np.argmin(np.abs(body_traj[:, 0] - t))
+    # For each range, find the closest SLAM pose, and embed that into the range.
+    for i in range(len(multi_all)):
 
-        T_world_to_body_tum = body_traj[idx]
-        T_world_to_body = slam_quat_to_HTM(T_world_to_body_tum)
-
-        T_decawave_to_world = (
-            np.linalg.inv(T_world_to_body)
-            @ np.linalg.inv(T.T_body_to_decawave)
-        )
-
-        src_pos = T_decawave_to_world[:3, 3]
-
-        # Mobile -> Mobile
-        if dst in mobile_nodes:
-
-            other_body_traj = np.array(
-                gt_trajectories[dst - 2]
-            )
-
-            idx = np.argmin(
-                np.abs(other_body_traj[:, 0] - t)
-            )
-
-            T_world_to_body_tum = other_body_traj[idx]
-            T_world_to_body = slam_quat_to_HTM(
-                T_world_to_body_tum
-            )
-
-            T_decawave_to_world = (
-                np.linalg.inv(T_world_to_body)
-                @ np.linalg.inv(T.T_body_to_decawave)
-            )
-
-            dst_pos = T_decawave_to_world[:3, 3]
-
-        # Mobile -> Anchor
-        else:
-
-            dst_pos = np.array(
-                [
-                    x["position"]
-                    for x in anchors
-                    if x["ID"] == dst
-                ][0]
-            )
-
-        true_range = np.linalg.norm(
-            src_pos - dst_pos
-        )
-
-        return np.random.normal(
-            true_range,
-            std
-        )
-
-    #
-    # Gather all existing UWB links
-    #
-    src_groups = {}
-
-    for msg in multi_all:
-
-        if msg.get("type") != "uwb":
-            continue
-
-        if msg["src"] not in mobile_nodes:
-            continue
-
-        src_groups.setdefault(msg["src"], {})
-        src_groups[msg["src"]].setdefault(
-            msg["id"],
-            []
-        )
-        src_groups[msg["src"]][msg["id"]].append(msg)
-
-    #
-    # Keep non-UWB messages
-    #
-    output = [
-        m
-        for m in multi_all
-        if m.get("type") != "uwb"
-    ]
-
-    #
-    # Generate synthetic schedule
-    #
-    dt = 1.0 / rate
-
-    for src, dst_groups in src_groups.items():
-
-        #
-        # Determine overall time span
-        #
-        all_msgs = []
-
-        for msgs in dst_groups.values():
-            all_msgs.extend(msgs)
-
-        all_msgs.sort(key=lambda x: x["t"])
-
-        if len(all_msgs) == 0:
-            continue
-
-        start_t = all_msgs[0]["t"]
-        end_t = all_msgs[-1]["t"]
-
-        #
-        # Destinations this source can range to
-        #
-        dst_ids = sorted(dst_groups.keys())
-
-        #
-        # Use first measurement on each link
-        # as a template
-        #
-        templates = {
-            dst: deepcopy(dst_groups[dst][0])
-            for dst in dst_ids
-        }
-
-        desired_times = np.arange(
-            start_t,
-            end_t,
-            dt
-        )
-
-        #
-        # Round-robin schedule
-        #
-        for k, t in enumerate(desired_times):
-
-            dst = dst_ids[
-                k % len(dst_ids)
-            ]
-
-            msg = deepcopy(
-                templates[dst]
-            )
-
-            msg["t"] = float(t)
-
-            msg["range"] = compute_range(
-                src,
-                dst,
-                t
-            )
-
-            output.append(msg)
-
-    output.sort(
-        key=lambda x: x.get("t", 0.0)
-    )
-
-    return output
+        mes = multi_all[i]
+        
+        if mes["type"] == "uwb":
+            this_id = mes["src"]
+            if this_id in mobile_nodes:
+                # print(this_id)
+                this_t = mes["t"]
+                # All aligned slam poses from this device
+                slam_poses = [m for m in multi_all if m["src"]==this_id and m["type"] == "aligned_slam_pose"]
+                # print(slam_poses)
+                slam_ts = [m["t"] for m in slam_poses] # Reduce to timestamps
+                # print(slam_ts)
+                idx = np.argmin(np.abs(np.array(slam_ts) - this_t)) # Get the closest slam pose timestamp to this UWB measurement
+                multi_all[i]["embedded_slam_pose"] = slam_poses[idx] # Embed it into the range.
+                # print(multi_all[i])
+    
+    return multi_all

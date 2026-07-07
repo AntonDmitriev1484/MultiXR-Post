@@ -656,16 +656,27 @@ if __name__ == "__main__":
         # Mirror UWB ranges. This is something the Beluga firmware could report, but doesn't.
         # It only logs range on the report, not on the final, this means the responder compute the range, but never logs it.
         # This will effectively double our ranges.
-        # mirrored_uwb = []
-        # for j in merged_all:
-        #     if j["type"] == "uwb":
-        #         j_ = copy.deepcopy(j)
-        #         temp_src = j["src"]
-        #         j_["src"] = j["id"]
-        #         j_["id"] = temp_src
-        #         mirrored_uwb.append(j_)
-        # merged_all += mirrored_uwb           
+        mirrored_uwb = []
+        for j in merged_all:
+            if j["type"] == "uwb":
+                j_ = copy.deepcopy(j)
+                temp_src = j["src"]
+                j_["src"] = j["id"]
+                j_["id"] = temp_src
+                mirrored_uwb.append(j_)
+        merged_all += mirrored_uwb 
 
+        merged_all = sorted(merged_all, key=lambda x: x["t"])
+
+        ### Flock Gossip
+        # Synthesize direct ranges for starting to test gossip.
+        synth_anchor_selfloc_ranges = range_synthesizer4(merged_all, anchor_positions, gt_trajectories, T, std=0.2)          
+        merged_all += synth_anchor_selfloc_ranges
+        # Append closest SLAM pose to each range.
+        merged_all = embed_poses_in_ranges(merged_all, anchor_positions, gt_trajectories)  
+        # for m in merged_all: 
+        #     if m["type"] == "uwb": print(m)
+        
         # Adjust for ?anchor coordinate frame error? on 1 and 5
         # In multi2, multi3, and opti_multi1
         # anchor_err_trial = False

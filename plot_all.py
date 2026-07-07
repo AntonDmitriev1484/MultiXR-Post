@@ -345,7 +345,8 @@ def plot_trial(
                     anchor_poses.append(
                         np.array(item["T_body_world"])
                     )
-
+            # TODO: Need to invert here.
+            
             if len(anchor_poses) > 0 and est_stride != DONT_PLOT:
 
                 positions_world = np.array([
