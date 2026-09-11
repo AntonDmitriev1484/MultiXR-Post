@@ -1,0 +1,31 @@
+==============================================================================
+filter evaluation: opti_multi1_free_nuc3_recall99_K3
+  trial opti_multi1_free_nuc3 | id 3 | cam trajectory
+==============================================================================
+raw (ref):  /home/antond2/Desktop/Research/MultiXR-Post/3/orbslam/out/opti_multi1_free_nuc3_raw_cam_traj.txt
+            968 poses | 52.38 s | 17.403 m path | timestamps read as ns
+filt (est): /home/antond2/Desktop/Research/MultiXR-Post/3/orbslam/out/opti_multi1_free_nuc3_recall99_K3_filt_cam_traj.txt
+            760 poses | 51.88 s | 16.892 m path | timestamps read as ns
+
+associated 447 pose pairs (max_diff 0.010 s) -- 46.2% of raw, 58.8% of filt
+alignment: SE(3), scale fixed
+
+  APE -- translation
+  ------------------
+    rmse        0.029654 m
+    mean        0.026514 m
+    median      0.025938 m
+    std         0.013279 m
+    min         0.002069 m
+    max         0.115752 m
+    sse         0.393061 m
+
+  APE -- rotation
+  ---------------
+    rmse        0.412703 deg
+    mean        0.392982 deg
+    median      0.360878 deg
+    std         0.126049 deg
+    min         0.145993 deg
+    max         1.016864 deg
+    sse        76.134566 deg

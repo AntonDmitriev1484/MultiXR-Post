@@ -628,6 +628,7 @@ if __name__ == "__main__":
     parser.add_argument("--median_filter", action="store_true")
     parser.add_argument("--cfar_filter", action="store_true")
     parser.add_argument("--dw_cfar_filter", action="store_true")
+    parser.add_argument("--anchor_prior_error", type=float)
 
     args = parser.parse_args()
 
@@ -646,8 +647,27 @@ if __name__ == "__main__":
             all, anchor_positions, T, body_opti_tum_traj = post_process(args)
             merged_all = merged_all + all
             gt_trajectories.append(body_opti_tum_traj)
-            # Record anchors
-            if user==2: json.dump(anchor_positions, open(outpath+"/anchors.json", 'w'), cls=NumpyEncoder, indent=1)
+            # Record anchors once
+            if user==2:
+                if args.anchor_prior_error is None: # Then file gtsam uses and ground truth are identical
+                    json.dump(anchor_positions, open(outpath+"/anchors.json", 'w'), cls=NumpyEncoder, indent=1)
+                    json.dump(anchor_positions, open(outpath+"/anchors_gt.json", 'w'), cls=NumpyEncoder, indent=1)
+                else: # If we add synthetic error to the priors GTSAM uses.
+                    print()
+                    json.dump(anchor_positions, open(outpath+"/anchors_gt.json", 'w'), cls=NumpyEncoder, indent=1)
+                    for a in anchor_positions:
+                        # Generate a random error vector
+                        # Random direction
+                        R = args.anchor_prior_error
+                        v = np.random.normal(size=3)
+                        v /= np.linalg.norm(v)
+                        # Radius distributed uniformly in volume
+                        r = R * np.random.random() ** (1/3)
+                        perturbation = r * v
+                        a["position"] += perturbation
+                        print(f" Shifted {a['ID']} by {perturbation}")
+                    json.dump(anchor_positions, open(outpath+"/anchors_gt.json", 'w'), cls=NumpyEncoder, indent=1) 
+                    # Now gtsam will use this errored copy for prior
 
             # Record transforms
             json.dump(vars(T), open(f'{outpath}/transforms{user}.json', 'w'), cls=NumpyEncoder, indent=1)
@@ -670,13 +690,11 @@ if __name__ == "__main__":
 
         ### Flock Gossip
         # Synthesize direct ranges for starting to test gossip.
-        synth_anchor_selfloc_ranges = range_synthesizer4(merged_all, anchor_positions, gt_trajectories, T, std=0.2)          
-        merged_all += synth_anchor_selfloc_ranges
+        # synth_anchor_selfloc_ranges = range_synthesizer4(merged_all, anchor_positions, gt_trajectories, T, std=0.2)          
+        # merged_all += synth_anchor_selfloc_ranges
         # Append closest SLAM pose to each range.
         merged_all = embed_poses_in_ranges(merged_all, anchor_positions, gt_trajectories)  
-        # for m in merged_all: 
-        #     if m["type"] == "uwb": print(m)
-        
+
         # Adjust for ?anchor coordinate frame error? on 1 and 5
         # In multi2, multi3, and opti_multi1
         # anchor_err_trial = False
