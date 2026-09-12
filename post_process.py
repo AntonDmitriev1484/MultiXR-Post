@@ -328,6 +328,9 @@ def post_process(args):
     ### Align SLAM trajectories to optitrack shared frame
     aligned_post_slam_json = []
     aligned_live_slam_json = []
+
+    localframe_live_slam_json = []
+
     body_post_slam_aligned_tum_traj = []
     body_live_slam_aligned_tum_traj = []
     if args.align:
@@ -351,6 +354,7 @@ def post_process(args):
         elif args.synth_failures: 
             # For now lets just assume that I will never add a synthetic failure to a real failure trajectory
             # otherwise the synthetic will overwrite the real failure annotations and it'll make a mess.
+            # Since we're creating synthetic failures, we're using post_slam
 
             synth_failures = []
             try:
@@ -358,17 +362,33 @@ def post_process(args):
             except Exception as err:
                 print("No synth failures detected, setting synth_failures = []")
 
-            body_post_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
-
             all_data_start_ts = metadata["start_ns"] * 1e-9
-            # fail_end_ts = synth_failures[0]["end"] + all_data_start_ts      
+            # fail_end_ts = synth_failures[0]["end"] + all_data_start_ts   
 
+            ### Add a synthetic failure to the local frame trajectory
+
+            body_post_slam_tum_traj = [ slam_HTM_to_TUM(h) for h in body_post_slam_HTMs ]
             # annotate the post slam trajectory, for use in the graph
-            aligned_post_slam_json = prep_annotate_slam_output(args, all_data_start_ts, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_slam_pose", synth_failures)
+            localframe_post_slam_json = prep_annotate_slam_output(
+                args, all_data_start_ts, END, T, np.array(body_post_slam_tum_traj), "slam_pose", synth_failures)
 
             # add newmap deformation and IMU segment, 
             # and annotate live slam trajectory for use in plotting (aligned_live_slam_json) and evaluation (body_live_slam_aligned_tum_traj)
-            aligned_live_slam_json, body_live_slam_aligned_tum_traj = prep_synth_fail_slam_output(args, all_data_start_ts, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_live_slam_pose", synth_failures)
+            localframe_live_slam_json, _ = prep_synth_fail_slam_output(
+                args, all_data_start_ts, END, T, np.array(body_post_slam_tum_traj), "localframe_live_slam_pose", synth_failures)
+
+            ### Add a synthetic failure to the optitrack-aligned trajectory 
+
+            body_post_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
+
+            # annotate the post slam trajectory, for use in the graph
+            aligned_post_slam_json = prep_annotate_slam_output(
+                args, all_data_start_ts, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_slam_pose", synth_failures)
+
+            # add newmap deformation and IMU segment, 
+            # and annotate live slam trajectory for use in plotting (aligned_live_slam_json) and evaluation (body_live_slam_aligned_tum_traj)
+            aligned_live_slam_json, body_live_slam_aligned_tum_traj = prep_synth_fail_slam_output(
+                args, all_data_start_ts, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_live_slam_pose", synth_failures)
 
         else:
             print("No real or synthetic failures! Aligning regular-style")
@@ -541,7 +561,10 @@ def post_process(args):
         # synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, f"/home/antond2/Desktop/Research/MultiXR-Post/merged/{args.trial_name}_merged")
     
     # Compose the final factor graph dataset
-    all_data = uwb_json + imu_json + opti_json + post_slam_json + synth_uwb_json + aligned_post_slam_json + aligned_live_slam_json
+    all_data = uwb_json + imu_json + opti_json + synth_uwb_json \
+            + post_slam_json + aligned_post_slam_json + aligned_live_slam_json \
+                  + localframe_live_slam_json # Add on for Cappella
+    
     for mes in all_data: mes["src"] = ID
 
 
