@@ -13,6 +13,10 @@ COLORS = {
     "lost": "#CC79A7",     # orange
 }
 
+# Root of the gtsam_test post-integration results. The per-trial file lives at
+# <root>/<id>/<trial_name>/localframe_live_slam.json
+POST_INTEGRATION_ROOT = "/home/antond2/Desktop/Research/gtsam_test/results/out/multi"
+
 
 def draw_axes(ax, T, length=0.1):
     """Draw coordinate axes from transformation matrix T."""
@@ -33,6 +37,92 @@ def draw_axes(ax, T, length=0.1):
 DONT_PLOT=-2
 
 
+def post_integration_path(id, trial_name, root=POST_INTEGRATION_ROOT):
+    """Resolve --post_integration into a json file path.
+
+    `root` may be the results root, or a path to a json file (used verbatim).
+    """
+    if root.endswith(".json"):
+        return root
+    return f"{root}/{id}/{trial_name}/localframe_live_slam.json"
+
+
+def load_localframe_slam(path):
+    """Read localframe_live_slam_pose entries into tracking / lost pose lists.
+
+    Both lists are the same length as the pose stream, with None wherever the
+    other list holds the pose, so plotting them yields two gapped trajectories.
+    """
+    slam_poses = []
+    lost_slam_poses = []
+
+    tracking = True
+    with open(path, "r") as f:
+        for item in json.load(f):
+            if (
+                item.get("type") == "localframe_live_slam_pose"
+                and "T_body_world" in item
+            ):
+                pose = np.array(item["T_body_world"])
+                if item.get("status") == "tracking":
+                    slam_poses.append(pose)
+                    if not tracking: lost_slam_poses.append(pose) # Ensure continuity between red lost line and the visual recovered trajectory
+                    lost_slam_poses.append(None)
+                    tracking = True
+                else:
+                    slam_poses.append(None)
+                    lost_slam_poses.append(pose)
+                    tracking = False
+
+    return slam_poses, lost_slam_poses
+
+
+def positions_from_poses(poses):
+    """World-frame positions, with NaN gaps where a pose is None."""
+    return np.array([
+        np.linalg.inv(p)[:3, 3] if p is not None
+        else [np.nan, np.nan, np.nan]
+        for p in poses
+    ])
+
+
+def plot_slam_traj(
+    ax,
+    slam_poses,
+    lost_slam_poses,
+    stride,
+    label,
+    color,
+    lost_color,
+    linestyle="-",
+):
+    """Plot one tracking/lost trajectory pair, optionally with body axes."""
+    positions_world = positions_from_poses(slam_poses)
+    ax.plot(
+        positions_world[:, 0],
+        positions_world[:, 1],
+        positions_world[:, 2],
+        label=label,
+        color=color,
+        linestyle=linestyle,
+    )
+
+    lost_positions_world = positions_from_poses(lost_slam_poses)
+    ax.plot(
+        lost_positions_world[:, 0],
+        lost_positions_world[:, 1],
+        lost_positions_world[:, 2],
+        label=f"LOST {label}",
+        color=lost_color,
+        linestyle=linestyle,
+    )
+
+    if stride > 0:
+        valid_slam = [p for p in slam_poses if p is not None]
+        for i in range(0, len(valid_slam), stride):
+            draw_axes(ax, valid_slam[i], length=0.4)
+
+
 def plot_trial(
     id,
     trial_name,
@@ -40,7 +130,9 @@ def plot_trial(
     paths=None,
     fixed_lims=False,
     show=True,
-    ax=None
+    ax=None,
+    post_integration=None,
+    stride=None,
 ):
     import json
     import numpy as np
@@ -60,32 +152,18 @@ def plot_trial(
     # Preserve function argument unless overridden
     if paths is not None:
         live_slam_path = paths.live_slam_path
+        if post_integration is None:
+            post_integration = getattr(paths, "post_integration_path", None)
+
+    # Coordinate frames are drawn every `stride` poses. Fall back to a positive
+    # --slam value, which has always doubled as a stride.
+    frame_stride = stride if stride else (slam_stride if slam_stride > 0 else 0)
 
     # ------------------------------
-    # Initialize pose containers
-    # ------------------------------
-
     # Load in local frame live slam poses
-    slam_poses = []
-    lost_slam_poses = []
+    # ------------------------------
 
-    tracking = True
-    with open(live_slam_path, "r") as f:
-        for item in json.load(f):
-            if (
-                item.get("type") == "localframe_live_slam_pose"
-                and "T_body_world" in item
-            ):
-                pose = np.array(item["T_body_world"])
-                if item.get("status") == "tracking":
-                    slam_poses.append(pose)
-                    if not tracking: lost_slam_poses.append(pose) # Ensure continuity between red lost line and the visual recovered trajectory
-                    lost_slam_poses.append(None)
-                    tracking = True
-                else:
-                    slam_poses.append(None)
-                    lost_slam_poses.append(pose)
-                    tracking = False
+    slam_poses, lost_slam_poses = load_localframe_slam(live_slam_path)
 
     # ------------------------------
     # Create figure if needed
@@ -100,41 +178,41 @@ def plot_trial(
     # Plot local frame live SLAM
     # ------------------------------
     if len(slam_poses) > 0 and slam_stride != DONT_PLOT:
-        positions_world = np.array([
-            np.linalg.inv(p)[:3, 3] if p is not None
-            else [np.nan, np.nan, np.nan]
-            for p in slam_poses
-        ])
-
-        ax.plot(
-            positions_world[:, 0],
-            positions_world[:, 1],
-            positions_world[:, 2],
+        plot_slam_traj(
+            ax,
+            slam_poses,
+            lost_slam_poses,
+            frame_stride,
             label="Local Frame Live SLAM",
-            color="green"
+            color="green",
+            lost_color="red",
         )
-
-        lost_positions_world = np.array([
-            np.linalg.inv(p)[:3, 3] if p is not None
-            else [np.nan, np.nan, np.nan]
-            for p in lost_slam_poses
-        ])
-
-        ax.plot(
-            lost_positions_world[:, 0],
-            lost_positions_world[:, 1],
-            lost_positions_world[:, 2],
-            label="LOST SLAM",
-            color="red"
-        )
-
-        valid_slam = [p for p in slam_poses if p is not None]
-
-        if slam_stride > 0:
-            for i in range(0, len(valid_slam), slam_stride):
-                draw_axes(ax, valid_slam[i], length=0.4)
     else:
         print("No localframe_live_slam_pose entries found")
+
+    # ------------------------------
+    # Plot post-integration result
+    # ------------------------------
+    title = f"NUC{id} {trial_name}\nLocal Frame Live SLAM"
+
+    if post_integration is not None:
+        pi_path = post_integration_path(id, trial_name, post_integration)
+        pi_poses, pi_lost_poses = load_localframe_slam(pi_path)
+
+        if len(pi_poses) > 0:
+            plot_slam_traj(
+                ax,
+                pi_poses,
+                pi_lost_poses,
+                frame_stride,
+                label="Post Integration",
+                color=COLORS["opti"],
+                lost_color=COLORS["anchor"],
+                linestyle="--",
+            )
+            title += " + Post Integration"
+        else:
+            print(f"No localframe_live_slam_pose entries found in {pi_path}")
 
     # ------------------------------
     # Plot formatting
@@ -150,7 +228,7 @@ def plot_trial(
         ax.set_ylim(-2.5, 4)
         ax.set_zlim(-2, 2)
 
-    ax.set_title(f"NUC{id} {trial_name}\nLocal Frame Live SLAM")
+    ax.set_title(title)
 
     ax.view_init(elev=45, azim=45)
     ax.legend()
@@ -180,6 +258,26 @@ def main():
         action="store_true",
         help="Use plot_all.py's hard-coded optitrack-frame axis limits."
     )
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=None,
+        help=(
+            "Draw a coordinate frame on every Xth tracking pose, for both the "
+            "live SLAM and post-integration trajectories. Overrides --slam's stride."
+        ),
+    )
+    parser.add_argument(
+        "--post_integration",
+        nargs="?",
+        const=POST_INTEGRATION_ROOT,
+        default=None,
+        help=(
+            "Also plot the post-integration trajectory from "
+            f"{POST_INTEGRATION_ROOT}/<id>/<trial_name>/localframe_live_slam.json. "
+            "Optionally pass a different results root, or a json file directly."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -190,6 +288,8 @@ def main():
         trial_name=args.trial_name,
         slam_stride=args.slam,
         fixed_lims=args.fixed_lims,
+        post_integration=args.post_integration,
+        stride=args.stride,
     )
 
 

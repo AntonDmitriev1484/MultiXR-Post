@@ -300,7 +300,8 @@ def umeyama_alignment1(body_opti_HTMs, body_slam_HTMs):
             qx, qy, qz, qw
         ])
 
-    return traj_est_out
+    # SLAM timestamps that survived association with optitrack
+    return traj_est_out, traj_est.timestamps.copy()
 
 
 import copy

@@ -365,21 +365,9 @@ def post_process(args):
             all_data_start_ts = metadata["start_ns"] * 1e-9
             # fail_end_ts = synth_failures[0]["end"] + all_data_start_ts   
 
-            ### Add a synthetic failure to the local frame trajectory
-
-            body_post_slam_tum_traj = [ slam_HTM_to_TUM(h) for h in body_post_slam_HTMs ]
-            # annotate the post slam trajectory, for use in the graph
-            localframe_post_slam_json = prep_annotate_slam_output(
-                args, all_data_start_ts, END, T, np.array(body_post_slam_tum_traj), "slam_pose", synth_failures)
-
-            # add newmap deformation and IMU segment, 
-            # and annotate live slam trajectory for use in plotting (aligned_live_slam_json) and evaluation (body_live_slam_aligned_tum_traj)
-            localframe_live_slam_json, _ = prep_synth_fail_slam_output(
-                args, all_data_start_ts, END, T, np.array(body_post_slam_tum_traj), "localframe_live_slam_pose", synth_failures)
-
             ### Add a synthetic failure to the optitrack-aligned trajectory 
 
-            body_post_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
+            body_post_slam_aligned_tum_traj, aligned_ts = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
 
             # annotate the post slam trajectory, for use in the graph
             aligned_post_slam_json = prep_annotate_slam_output(
@@ -390,9 +378,21 @@ def post_process(args):
             aligned_live_slam_json, body_live_slam_aligned_tum_traj = prep_synth_fail_slam_output(
                 args, all_data_start_ts, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_live_slam_pose", synth_failures)
 
+
+            ### Add a synthetic failure to the local frame trajectory
+
+            # Crop to the same timestamps as the aligned trajectory, so both share the same origin pose
+            body_post_slam_tum_traj = [ slam_HTM_to_TUM(h) for h in body_post_slam_HTMs if np.isin(h[0], aligned_ts) ]
+
+            # add newmap deformation and IMU segment, 
+            # and annotate live slam trajectory for use in plotting (aligned_live_slam_json) and evaluation (body_live_slam_aligned_tum_traj)
+            localframe_live_slam_json, _ = prep_synth_fail_slam_output(
+                args, all_data_start_ts, END, T, np.array(body_post_slam_tum_traj), "localframe_live_slam_pose", synth_failures)
+
+
         else:
             print("No real or synthetic failures! Aligning regular-style")
-            body_post_slam_aligned_tum_traj = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
+            body_post_slam_aligned_tum_traj, _ = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
 
             def identity(T_body_to_world): # Already in body frame.
                 return T_body_to_world
