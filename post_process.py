@@ -333,7 +333,10 @@ def post_process(args):
 
     body_post_slam_aligned_tum_traj = []
     body_live_slam_aligned_tum_traj = []
+
+    
     if args.align:
+
 
         if real_failures:
             # Compute alignment using the SLAM 'save_traj' trajectory to the Optitrack trajectory
@@ -343,14 +346,18 @@ def post_process(args):
             all_data_start_ts = metadata["start_ns"] * 1e-9
             fail_end_ts = real_failures[0]["end"] + all_data_start_ts      
             # output body live slam trajectory - for use in evaluation
-            body_post_slam_aligned_tum_traj, body_live_slam_aligned_tum_traj = bonus_umeyama_alignment(body_opti_HTMs, body_post_slam_HTMs, body_live_slam_HTMs, fail_end_ts)
+            body_post_slam_aligned_tum_traj, body_live_slam_aligned_tum_traj, aligned_ts = bonus_umeyama_alignment(body_opti_HTMs, body_post_slam_HTMs, body_live_slam_HTMs, fail_end_ts)
 
             # annotate the live slam trajectory with real failures file - for use in plotting
             aligned_live_slam_json = prep_annotate_slam_output(args, all_data_start_ts, END, T, np.array(body_live_slam_aligned_tum_traj), "aligned_live_slam_pose", real_failures)
 
             # annotate the post slam trajectory in the same way - for use in graph
             aligned_post_slam_json = prep_annotate_slam_output(args, all_data_start_ts, END, T, np.array(body_post_slam_aligned_tum_traj), "aligned_slam_pose", real_failures)
-            
+
+            # Crop to the same timestamps as the aligned trajectory, so both share the same origin pose
+            A = [ slam_HTM_to_TUM(h) for h in body_live_slam_HTMs if np.isin(h[0], aligned_ts) ]
+            localframe_live_slam_json = prep_annotate_slam_output(args, all_data_start_ts, END, T, np.array(A), "localframe_live_slam_pose", real_failures)
+
         elif args.synth_failures: 
             # For now lets just assume that I will never add a synthetic failure to a real failure trajectory
             # otherwise the synthetic will overwrite the real failure annotations and it'll make a mess.
@@ -392,7 +399,7 @@ def post_process(args):
 
         else:
             print("No real or synthetic failures! Aligning regular-style")
-            body_post_slam_aligned_tum_traj, _ = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
+            body_post_slam_aligned_tum_traj, aligned_ts = umeyama_alignment1(body_opti_HTMs, body_post_slam_HTMs)
 
             def identity(T_body_to_world): # Already in body frame.
                 return T_body_to_world
@@ -422,6 +429,17 @@ def post_process(args):
             body_live_slam_aligned_tum_traj = body_post_slam_aligned_tum_traj
             aligned_live_slam_json = copy.deepcopy(aligned_post_slam_json)
             for j in aligned_live_slam_json: j["type"] = "aligned_live_slam_pose"
+
+    ### Annoying extra code we need to add to run cappella with real trials
+    real_trials = [
+    'multi2_follow_loss2',
+    'multi2_trip_loss',
+    'multi2_board_loss3'
+    ]
+    if args.trial_name in real_trials and not real_failures:
+        print(f"Cappella for {args.id}")
+        localframe_live_slam_json = copy.deepcopy(post_slam_json)
+        for u in localframe_live_slam_json: u["type"] = "localframe_live_slam_pose"
 
     ### Apply sensitivity analysis operations
 

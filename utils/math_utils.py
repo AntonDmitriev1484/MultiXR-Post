@@ -559,7 +559,9 @@ def bonus_umeyama_alignment(
 
 
 
+    # Live SLAM timestamps present in the aligned live trajectory
     return (
         traj_to_tum(aligned_slam),
-        traj_to_tum(aligned_live_slam)
+        traj_to_tum(aligned_live_slam),
+        aligned_live_slam.timestamps.copy()
     )
