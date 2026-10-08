@@ -26,6 +26,7 @@ from utils.vicon_utils import *
 from utils.optitrack_utils import *
 from utils.uwb_utils import *
 from utils.ros1_slam_utils import *
+from utils.perturb import perturb
 
 
 import matplotlib.pyplot as plt
@@ -578,8 +579,14 @@ def post_process(args):
     # if args.id == 4:
         # synth_uwb_json = range_synthesizer2(START, END, body_opti_tum_traj, T, f"/home/antond2/Desktop/Research/MultiXR-Post/merged/{args.trial_name}_merged")
     
+
+    # Perturb every SLAM trajectory by a random translation + yaw (about each trajectory's first pose)
+    if args.perturb_t is not None or args.perturb_r is not None:
+        post_slam_json, aligned_post_slam_json, aligned_live_slam_json, localframe_live_slam_json = perturb(
+            args.perturb_t, args.perturb_r, post_slam_json, aligned_post_slam_json, aligned_live_slam_json, localframe_live_slam_json)
+
     # Compose the final factor graph dataset
-    all_data = uwb_json + imu_json + opti_json + synth_uwb_json \
+    all_data =uwb_json + imu_json + opti_json + synth_uwb_json \
             + post_slam_json + aligned_post_slam_json + aligned_live_slam_json \
                   + localframe_live_slam_json # Add on for Cappella
     
@@ -670,6 +677,9 @@ if __name__ == "__main__":
     parser.add_argument("--cfar_filter", action="store_true")
     parser.add_argument("--dw_cfar_filter", action="store_true")
     parser.add_argument("--anchor_prior_error", type=float)
+    # Perturb SLAM trajectories by perturb_t meters (random 3D direction) then perturb_r degrees of yaw
+    parser.add_argument("--perturb_t", type=float)
+    parser.add_argument("--perturb_r", type=float)
 
     args = parser.parse_args()
 
